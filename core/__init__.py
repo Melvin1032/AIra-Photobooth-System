@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - Core Modules
+"""AIra Pro Photobooth System - Core Modules
 Camera, compositing, and session management.
 """
 

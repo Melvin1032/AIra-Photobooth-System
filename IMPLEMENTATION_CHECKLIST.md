@@ -1,4 +1,4 @@
-# SnapFrame Pro - Quick Implementation Checklist
+# AIra Pro Photobooth System - Quick Implementation Checklist
 
 Print this and check off each item as you implement it.
 

@@ -1,6 +1,6 @@
-# SnapFrame Pro - UI Test Build
+# AIra Pro Photobooth System - UI Test Build
 
-Complete, testable UI for the SnapFrame Pro photobooth application.
+Complete, testable UI for the AIra Pro Photobooth System.
 
 ## 🚀 Quick Start
 
@@ -241,7 +241,7 @@ pip install PyQt6 --upgrade
 
 ## 📄 License
 
-Internal use for SnapFrame Pro development.
+Internal use for AIra Pro Photobooth System development.
 
 ---
 

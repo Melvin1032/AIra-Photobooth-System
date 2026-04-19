@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - Session Log Table
+"""AIra Pro Photobooth System - Session Log Table
 Professional session history table with edit/delete actions.
 """
 

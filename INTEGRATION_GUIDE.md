@@ -1,4 +1,4 @@
-# SnapFrame Pro - Feature Integration Guide
+# AIra Pro Photobooth System - Feature Integration Guide
 
 This guide shows you how to integrate all the new optimizations and features into your existing codebase.
 

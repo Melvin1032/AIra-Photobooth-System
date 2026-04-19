@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - UI Module
+"""AIra Pro Photobooth System - UI Module
 Contains all UI components for the photobooth application.
 """
 

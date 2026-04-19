@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - Main Entry Point
+"""AIra Pro Photobooth System - Main Entry Point
 Photobooth application with complete testable UI.
 """
 
@@ -42,7 +41,7 @@ def setup_application():
     # Set application metadata
     app.setApplicationName(config.app_name)
     app.setApplicationVersion(config.version)
-    app.setOrganizationName("SnapFrame")
+    app.setOrganizationName("AIra Pro")
     
     # Set default font
     font = QFont(config.get('ui.font_family', 'Segoe UI'), config.get_font_size())

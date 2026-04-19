@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - CSV Export Module
+"""AIra Pro Photobooth System - CSV Export Module
 Exports session data to CSV format for reporting and accounting.
 Optimized for low-end PCs using built-in csv module (no pandas required).
 """

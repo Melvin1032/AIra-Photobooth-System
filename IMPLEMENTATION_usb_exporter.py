@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - USB Export Module
+"""AIra Pro Photobooth System - USB Export Module
 Detects USB removable drives and copies photos with progress tracking.
 Optimized for low-end PCs with background thread processing.
 """

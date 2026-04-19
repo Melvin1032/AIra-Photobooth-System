@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - Image Compositor
+"""AIra Pro Photobooth System - Image Compositor
 Handles photo compositing with frames.
 """
 

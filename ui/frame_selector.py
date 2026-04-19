@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - Frame Selector
+"""AIra Pro Photobooth System - Frame Selector
 Grid-based frame selection with thumbnails and metadata display.
 """
 

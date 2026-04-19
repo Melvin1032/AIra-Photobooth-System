@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - Performance Optimizations
+"""AIra Pro Photobooth System - Performance Optimizations
 All performance optimization implementations for low-end PCs.
 Includes: SQLite WAL mode, frame pre-caching, memory cleanup, and more.
 """

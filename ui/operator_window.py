@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - Operator Window
+"""AIra Pro Photobooth System - Operator Window
 Main operator dashboard with complete UI.
 """
 

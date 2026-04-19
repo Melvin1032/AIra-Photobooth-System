@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - Configuration Manager
+"""AIra Pro Photobooth System - Configuration Manager
 Handles theme, settings, and preferences.
 """
 
@@ -29,7 +28,7 @@ class Config:
         
         # Default configuration
         return {
-            "app_name": "SnapFrame Pro",
+            "app_name": "AIra Pro Photobooth System",
             "version": "2.1.0",
             "ui": {
                 "theme": "dark",
@@ -88,7 +87,7 @@ class Config:
     
     @property
     def app_name(self) -> str:
-        return self.get('app_name', 'SnapFrame Pro')
+        return self.get('app_name', 'AIra Pro Photobooth System')
     
     @property
     def version(self) -> str:

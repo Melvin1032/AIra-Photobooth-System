@@ -1,8 +1,8 @@
-# SnapFrame Pro - Performance Optimization Summary
+# AIra Pro Photobooth System - Performance Optimization Summary
 
 ## 📋 Overview
 
-This document summarizes all performance optimizations implemented for SnapFrame Pro to ensure smooth operation on **low-end PCs** (4GB RAM, dual-core CPU, HDD storage).
+This document summarizes all performance optimizations implemented for AIra Pro Photobooth System to ensure smooth operation on **low-end PCs** (4GB RAM, dual-core CPU, HDD storage).
 
 ---
 

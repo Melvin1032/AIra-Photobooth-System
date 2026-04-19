@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - Print Dialog
+"""AIra Pro Photobooth System - Print Dialog
 Print confirmation and settings dialog.
 """
 

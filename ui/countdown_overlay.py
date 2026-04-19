@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - Countdown Overlay
+"""AIra Pro Photobooth System - Countdown Overlay
 Animated countdown widget for photo capture.
 """
 

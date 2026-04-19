@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - Session Manager
+"""AIra Pro Photobooth System - Session Manager
 Handles database operations for events, sessions, and photos.
 """
 

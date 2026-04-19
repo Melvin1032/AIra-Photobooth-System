@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - Viewer Window
+"""AIra Pro Photobooth System - Viewer Window
 Secondary display window for client viewing.
 """
 
@@ -14,7 +13,7 @@ class ViewerWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         
-        self.setWindowTitle("SnapFrame Pro - Viewer Display")
+        self.setWindowTitle("AIra Pro Photobooth System - Viewer Display")
         self.setMinimumSize(800, 600)
         
         # State
@@ -91,7 +90,7 @@ class ViewerWindow(QMainWindow):
         painter.setPen(QColor("#FFD700"))
         font = QFont("Segoe UI", 48, QFont.Weight.Bold)
         painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "📷 SnapFrame Pro")
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "📷 AIra Pro Photobooth System")
         
         # Draw subtitle
         font = QFont("Segoe UI", 24)

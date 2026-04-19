@@ -1,5 +1,4 @@
-"""
-SnapFrame Pro - Camera Module
+"""AIra Pro Photobooth System - Camera Module
 Handles webcam and tethered camera integration.
 """
 
