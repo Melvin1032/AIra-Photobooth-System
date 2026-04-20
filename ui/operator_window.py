@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QInputDialog, QFileDialog
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QPixmap, QImage, QColor, QPainter, QFont
+from PyQt6.QtGui import QPixmap, QImage, QColor, QPainter, QFont, QLinearGradient, QPen
 
 from config import config
 from ui.frame_selector import FrameSelector
@@ -21,19 +21,183 @@ from core.compositor import ImageCompositor
 from core.session_manager import SessionManager
 
 
+# ── Shared Style Tokens ──────────────────────────────────────────────────────
+
+GOLD       = "#D4AF37"
+GOLD_BRIGHT= "#FFD700"
+GOLD_DIM   = "#B8860B"
+BG_DEEP    = "#080808"
+BG_PANEL   = "#101010"
+BG_CARD    = "#141414"
+BG_INPUT   = "#0d0d0d"
+BORDER     = "#1e1e1e"
+BORDER_MID = "#2a2a2a"
+TEXT_PRI   = "#e8e8e8"
+TEXT_SEC   = "#888888"
+TEXT_DIM   = "#444444"
+GREEN      = "#27ae60"
+RED        = "#e74c3c"
+
+CAPTION_STYLE = f"""
+    color: {GOLD};
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: 3px;
+    background: transparent;
+"""
+
+PANEL_TITLE_STYLE = f"""
+    color: {GOLD};
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: 4px;
+    padding: 0px;
+    background: transparent;
+"""
+
+LABEL_STYLE = f"""
+    color: {TEXT_SEC};
+    font-size: 10px;
+    letter-spacing: 1px;
+    background: transparent;
+"""
+
+INPUT_STYLE = f"""
+    QLineEdit {{
+        background-color: {BG_INPUT};
+        color: {TEXT_PRI};
+        border: 1px solid {BORDER_MID};
+        border-radius: 3px;
+        padding: 7px 10px;
+        font-size: 12px;
+    }}
+    QLineEdit:focus {{
+        border-color: {GOLD};
+    }}
+    QLineEdit::placeholder {{
+        color: {TEXT_DIM};
+    }}
+"""
+
+COMBO_STYLE = f"""
+    QComboBox {{
+        background-color: {BG_INPUT};
+        color: {TEXT_PRI};
+        border: 1px solid {BORDER_MID};
+        border-radius: 3px;
+        padding: 7px 10px;
+        font-size: 12px;
+    }}
+    QComboBox:focus {{ border-color: {GOLD}; }}
+    QComboBox::drop-down {{ border: none; width: 24px; }}
+    QComboBox::down-arrow {{
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-top: 5px solid {GOLD};
+    }}
+    QComboBox QAbstractItemView {{
+        background-color: {BG_CARD};
+        color: {TEXT_PRI};
+        selection-background-color: {GOLD};
+        selection-color: #000;
+        border: 1px solid {BORDER_MID};
+    }}
+"""
+
+def _btn(label: str, variant: str = "default", height: int = 36) -> QPushButton:
+    """Helper to create styled buttons."""
+    btn = QPushButton(label)
+    btn.setFixedHeight(height)
+
+    if variant == "primary":
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {GOLD};
+                color: #000000;
+                border: none;
+                border-radius: 3px;
+                font-size: 13px;
+                font-weight: bold;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{ background-color: {GOLD_BRIGHT}; }}
+            QPushButton:pressed {{ background-color: {GOLD_DIM}; }}
+            QPushButton:disabled {{ background-color: #1e1e1e; color: {TEXT_DIM}; }}
+        """)
+    elif variant == "ghost":
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {TEXT_SEC};
+                border: 1px solid {BORDER_MID};
+                border-radius: 3px;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background-color: {BG_CARD};
+                color: {GOLD};
+                border-color: {GOLD};
+            }}
+        """)
+    elif variant == "danger":
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: #c0392b;
+                border: 1px solid #3a1a1a;
+                border-radius: 3px;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background-color: #3a1a1a;
+                color: {RED};
+            }}
+        """)
+    else:  # default
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BG_CARD};
+                color: {TEXT_SEC};
+                border: 1px solid {BORDER_MID};
+                border-radius: 3px;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background-color: #1a1a1a;
+                color: {TEXT_PRI};
+                border-color: #3a3a3a;
+            }}
+            QPushButton:pressed {{
+                background-color: {GOLD};
+                color: #000;
+            }}
+        """)
+
+    return btn
+
+
+def _divider() -> QFrame:
+    d = QFrame()
+    d.setFixedHeight(1)
+    d.setStyleSheet(f"background-color: {BORDER};")
+    return d
+
+
+# ── Main Window ───────────────────────────────────────────────────────────────
+
 class OperatorWindow(QMainWindow):
     """Main operator dashboard window."""
-    
+
     capture_requested = pyqtSignal()
     countdown_started = pyqtSignal(int)
-    
+
     def __init__(self):
         super().__init__()
-        
-        self.setWindowTitle(f"{config.app_name} v{config.version} - Operator Dashboard")
+
+        self.setWindowTitle(f"{config.app_name} v{config.version} — Operator")
         self.setMinimumSize(1400, 900)
         self.resize(1600, 1000)
-        
+
         # State
         self.current_event_id = None
         self.current_frame_id = None
@@ -42,730 +206,560 @@ class OperatorWindow(QMainWindow):
         self.current_slot_index = 0
         self.is_countdown_active = False
         self.is_dark_mode = True
-        self.preview_mode = "live"  # "live", "countdown", "review"
-        
-        # Review timer
+        self.preview_mode = "live"
+
         self.review_timer = QTimer()
         self.review_timer.setSingleShot(True)
         self.review_timer.timeout.connect(self._return_to_live_preview)
-        
-        # Viewer window
+
         self.viewer_window = None
-        
+
         # Core components
         self.camera_manager = CameraManager()
         self.compositor = ImageCompositor()
         self.session_manager = SessionManager()
-        
-        # Camera preview timer - 30 FPS for smoothness
+
         self.preview_timer = QTimer()
         self.preview_timer.timeout.connect(self._update_preview)
-        self.preview_timer.setInterval(33)  # ~30 FPS
-        
-        # Available cameras list
+        self.preview_timer.setInterval(33)
+
         self.available_cameras = []
         self.current_camera_index = 0
-        self.camera_combo = None  # Will be created in UI
-        
+        self.camera_combo = None
+
         self._setup_ui()
         self._apply_theme()
         self._initialize_camera()
         self._load_initial_data()
-    
+
+    # ── UI Construction ───────────────────────────────────────────────────────
+
     def _setup_ui(self):
-        """Setup the complete UI layout."""
         central = QWidget()
         self.setCentralWidget(central)
-        
-        main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
-        
-        # === TOP BAR ===
-        main_layout.addWidget(self._create_top_bar())
-        
-        # === MAIN CONTENT AREA ===
+
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        root.addWidget(self._create_top_bar())
+
+        # Main splitter area
+        splitter_wrap = QWidget()
+        splitter_wrap.setStyleSheet(f"background-color: {BG_DEEP};")
+        wrap_layout = QVBoxLayout(splitter_wrap)
+        wrap_layout.setContentsMargins(10, 10, 10, 10)
+        wrap_layout.setSpacing(10)
+
         content_splitter = QSplitter(Qt.Orientation.Horizontal)
-        
-        # Left Panel - Frame Selection
-        left_panel = self._create_left_panel()
-        content_splitter.addWidget(left_panel)
-        
-        # Center Panel - Preview & Controls
-        center_panel = self._create_center_panel()
-        content_splitter.addWidget(center_panel)
-        
-        # Right Panel - Session Info
-        right_panel = self._create_right_panel()
-        content_splitter.addWidget(right_panel)
-        
-        # Set splitter proportions
-        content_splitter.setSizes([300, 700, 400])
-        
-        main_layout.addWidget(content_splitter, stretch=1)
-        
-        # === BOTTOM BAR - Session Log ===
-        main_layout.addWidget(self._create_bottom_panel())
-    
-    def _create_top_bar(self) -> QFrame:
-        """Create the top navigation bar."""
-        bar = QFrame()
-        bar.setFixedHeight(70)
-        bar.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #1a1a1a, stop:0.5 #2d2d2d, stop:1 #1a1a1a);
-                border-bottom: 3px solid #D4AF37;
-                border-radius: 8px;
-            }
+        content_splitter.setStyleSheet("""
+            QSplitter::handle { background-color: #1a1a1a; width: 1px; }
         """)
-        
+
+        content_splitter.addWidget(self._create_left_panel())
+        content_splitter.addWidget(self._create_center_panel())
+        content_splitter.addWidget(self._create_right_panel())
+        content_splitter.setSizes([280, 720, 300])
+
+        wrap_layout.addWidget(content_splitter, stretch=1)
+        wrap_layout.addWidget(self._create_bottom_panel())
+
+        root.addWidget(splitter_wrap, stretch=1)
+
+    def _create_top_bar(self) -> QWidget:
+        bar = QWidget()
+        bar.setFixedHeight(56)
+        bar.setStyleSheet(f"""
+            QWidget {{
+                background-color: #0a0a0a;
+                border-bottom: 1px solid {BORDER};
+            }}
+        """)
+
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(15, 5, 15, 5)
-        
-        # Logo/Title
-        title = QLabel(f"📷 {config.app_name}")
-        title.setStyleSheet("""
-            font-size: 24px;
+        layout.setContentsMargins(20, 0, 16, 0)
+        layout.setSpacing(0)
+
+        # Logo mark
+        logo_mark = QLabel("✦")
+        logo_mark.setStyleSheet(f"color: {GOLD}; font-size: 14px; background: transparent;")
+        layout.addWidget(logo_mark)
+        layout.addSpacing(10)
+
+        # App name
+        title = QLabel(config.app_name.upper())
+        title.setStyleSheet(f"""
+            color: {TEXT_PRI};
+            font-size: 13px;
             font-weight: bold;
-            color: #FFD700;
+            letter-spacing: 5px;
             background: transparent;
         """)
         layout.addWidget(title)
-        
-        layout.addSpacing(20)
-        
-        # Event label - minimal styling
-        self.event_label = QLabel("Event: Not Selected")
-        self.event_label.setStyleSheet("""
-            font-size: 14px;
-            color: #cccccc;
+
+        layout.addSpacing(6)
+
+        version_label = QLabel(f"v{config.version}")
+        version_label.setStyleSheet(f"color: {TEXT_DIM}; font-size: 9px; background: transparent;")
+        layout.addWidget(version_label)
+
+        layout.addSpacing(24)
+
+        # Event badge
+        self.event_label = QLabel("NO EVENT SELECTED")
+        self.event_label.setStyleSheet(f"""
+            color: {TEXT_DIM};
+            font-size: 9px;
+            letter-spacing: 2px;
             background: transparent;
-            padding: 5px 12px;
-            border: 1px solid #444;
-            border-radius: 4px;
+            padding: 4px 12px;
+            border: 1px solid {BORDER};
+            border-radius: 2px;
         """)
         layout.addWidget(self.event_label)
-        
+
         layout.addStretch()
-        
-        # Event management buttons (hidden initially)
-        self.edit_event_btn = QPushButton("✏️ Edit Event")
-        self.edit_event_btn.setFixedHeight(40)
+
+        # Event management
+        self.edit_event_btn = _btn("✏  EDIT", "ghost", 32)
+        self.edit_event_btn.setFixedWidth(80)
         self.edit_event_btn.setVisible(False)
         self.edit_event_btn.clicked.connect(self._edit_current_event)
         layout.addWidget(self.edit_event_btn)
-        
-        self.delete_event_btn = QPushButton("🗑️ Delete Event")
-        self.delete_event_btn.setFixedHeight(40)
+        layout.addSpacing(4)
+
+        self.delete_event_btn = _btn("✕  DEL", "danger", 32)
+        self.delete_event_btn.setFixedWidth(80)
         self.delete_event_btn.setVisible(False)
         self.delete_event_btn.clicked.connect(self._delete_current_event)
         layout.addWidget(self.delete_event_btn)
-        
-        layout.addSpacing(10)
-        
+
+        layout.addSpacing(16)
+
         # Theme toggle
-        self.theme_btn = QPushButton("🌙 Dark")
-        self.theme_btn.setFixedHeight(40)
-        self.theme_btn.setFixedWidth(100)
+        self.theme_btn = _btn("◑  DARK", "ghost", 32)
+        self.theme_btn.setFixedWidth(90)
         self.theme_btn.clicked.connect(self._toggle_theme)
         layout.addWidget(self.theme_btn)
-        
-        # Camera selector dropdown
-        layout.addSpacing(10)
-        camera_label = QLabel("📷 Camera:")
-        camera_label.setStyleSheet("color: #cccccc; background: transparent;")
-        layout.addWidget(camera_label)
-        
+
+        layout.addSpacing(16)
+
+        # Camera label + combo
+        cam_label = QLabel("CAM")
+        cam_label.setStyleSheet(f"color: {TEXT_DIM}; font-size: 9px; letter-spacing: 2px; background: transparent;")
+        layout.addWidget(cam_label)
+        layout.addSpacing(8)
+
         self.camera_combo = QComboBox()
-        self.camera_combo.setFixedHeight(40)
-        self.camera_combo.setFixedWidth(250)
-        self.camera_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #252525;
-                color: #ffffff;
-                border: 1px solid #444;
-                border-radius: 4px;
-                padding: 6px;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 30px;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 5px solid #D4AF37;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #252525;
-                color: #ffffff;
-                selection-background-color: #D4AF37;
-                selection-color: #000000;
-            }
-        """)
+        self.camera_combo.setFixedHeight(32)
+        self.camera_combo.setFixedWidth(220)
+        self.camera_combo.setStyleSheet(COMBO_STYLE)
         self.camera_combo.currentIndexChanged.connect(self._on_camera_changed)
         layout.addWidget(self.camera_combo)
-        
-        # Refresh camera button
-        refresh_camera_btn = QPushButton("🔄")
-        refresh_camera_btn.setFixedSize(40, 40)
-        refresh_camera_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #252525;
-                color: #cccccc;
-                border: 1px solid #444;
-                border-radius: 4px;
-                font-size: 16px;
-            }
-            QPushButton:hover {
-                background-color: #333;
-                border-color: #D4AF37;
-            }
-        """)
-        refresh_camera_btn.setToolTip("Refresh camera list")
-        refresh_camera_btn.clicked.connect(self._refresh_cameras)
-        layout.addWidget(refresh_camera_btn)
-        
-        layout.addSpacing(10)
-        
-        # Settings button
-        settings_btn = QPushButton("⚙️")
-        settings_btn.setFixedSize(50, 50)
-        settings_btn.setStyleSheet("font-size: 20px;")
+        layout.addSpacing(4)
+
+        refresh_btn = _btn("↻", "ghost", 32)
+        refresh_btn.setFixedWidth(32)
+        refresh_btn.setToolTip("Refresh cameras")
+        refresh_btn.clicked.connect(self._refresh_cameras)
+        layout.addWidget(refresh_btn)
+
+        layout.addSpacing(12)
+
+        settings_btn = _btn("⚙", "ghost", 32)
+        settings_btn.setFixedWidth(36)
         settings_btn.clicked.connect(self._show_settings)
         layout.addWidget(settings_btn)
-        
+
         return bar
-    
+
     def _create_left_panel(self) -> QFrame:
-        """Create the left panel with frame selector."""
         panel = QFrame()
-        panel.setMinimumWidth(280)
-        panel.setMaximumWidth(350)
-        panel.setStyleSheet("""
-            QFrame {
-                background-color: #1a1a1a;
-                border: 1px solid #3d3d3d;
-                border-radius: 8px;
-            }
+        panel.setMinimumWidth(260)
+        panel.setMaximumWidth(320)
+        panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {BG_PANEL};
+                border: 1px solid {BORDER};
+                border-radius: 4px;
+            }}
         """)
-        
+
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(10, 10, 10, 10)
-        
-        # Panel title - minimal gold
-        title = QLabel("🖼️ Frame Selection")
-        title.setStyleSheet("""
-            font-size: 15px;
-            font-weight: bold;
-            color: #D4AF37;
-            padding: 5px;
-            border-bottom: 1px solid #3d3d3d;
-        """)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        title = QLabel("FRAMES")
+        title.setStyleSheet(PANEL_TITLE_STYLE)
         layout.addWidget(title)
-        
-        # Frame selector
+        layout.addWidget(_divider())
+
         self.frame_selector = FrameSelector()
+        self.frame_selector.setStyleSheet("background: transparent;")
         self.frame_selector.frame_selected.connect(self._on_frame_selected)
         self.frame_selector.frame_deleted.connect(self._on_frame_deleted)
         self.frame_selector.frame_edit_requested.connect(self._on_frame_edit)
         layout.addWidget(self.frame_selector)
-        
+
         return panel
-    
+
     def _create_center_panel(self) -> QFrame:
-        """Create the center panel with preview and controls."""
         panel = QFrame()
-        panel.setStyleSheet("""
-            QFrame {
-                background-color: #1a1a1a;
-                border: 1px solid #3d3d3d;
-                border-radius: 8px;
-            }
-        """)
-        
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
-        
-        # Preview area - maximize container, minimal border
-        preview_frame = QFrame()
-        preview_frame.setStyleSheet("""
-            QFrame {
-                background-color: #000000;
-                border: 1px solid #2d2d2d;
+        panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {BG_PANEL};
+                border: 1px solid {BORDER};
                 border-radius: 4px;
-            }
+            }}
         """)
-        preview_layout = QVBoxLayout(preview_frame)
-        preview_layout.setContentsMargins(2, 2, 2, 2)
-        preview_layout.setSpacing(0)
-        
-        self.preview_label = QLabel("📷 Live Preview")
-        # Set 16:9 aspect ratio (1280x720 scaled down)
-        self.preview_label.setMinimumSize(640, 360)
-        self.preview_label.setSizePolicy(
-            self.preview_label.sizePolicy().horizontalPolicy().Expanding,
-            self.preview_label.sizePolicy().verticalPolicy().Expanding
-        )
-        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setStyleSheet("""
-            background-color: #000000;
-            color: #444;
-            font-size: 18px;
-        """)
-        preview_layout.addWidget(self.preview_label, stretch=1)
-        
-        # Countdown overlay
-        self.countdown_overlay = CountdownOverlay(self.preview_label)
-        self.countdown_overlay.countdown_finished.connect(self._on_countdown_finished)
-        
-        layout.addWidget(preview_frame, stretch=1)
-        
-        # Selected frame info - minimal styling
-        self.selected_frame_label = QLabel("Frame: Not Selected")
-        self.selected_frame_label.setStyleSheet("""
-            font-size: 13px;
-            color: #cccccc;
-            padding: 6px;
-            background-color: #252525;
-            border-radius: 4px;
-        """)
-        self.selected_frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.selected_frame_label)
-        
-        # Shot status - minimal styling
-        self.shot_status = QLabel("Ready to capture")
-        self.shot_status.setStyleSheet("""
-            font-size: 14px;
-            color: #4CAF50;
-            font-weight: bold;
-            padding: 8px;
-            background-color: #252525;
-            border-radius: 4px;
-        """)
-        self.shot_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.shot_status)
-        
-        # Control buttons
-        controls_layout = QHBoxLayout()
-        
-        self.capture_btn = QPushButton("📸 CAPTURE")
-        self.capture_btn.setFixedHeight(60)
-        self.capture_btn.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #D4AF37, stop:1 #FFD700);
-                color: #000000;
-                border: 3px solid #FFD700;
-                border-radius: 10px;
-                font-size: 20px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #FFD700, stop:1 #D4AF37);
-            }
-            QPushButton:pressed {
-                background-color: #B8860B;
-            }
-            QPushButton:disabled {
-                background-color: #555;
-                color: #888;
-                border-color: #666;
-            }
-        """)
-        self.capture_btn.clicked.connect(self._on_capture_clicked)
-        controls_layout.addWidget(self.capture_btn, stretch=2)
-        
-        self.print_btn = QPushButton("🖨️ Print")
-        self.print_btn.setFixedHeight(60)
-        self.print_btn.clicked.connect(self._on_print_clicked)
-        controls_layout.addWidget(self.print_btn, stretch=1)
-        
-        self.viewer_btn = QPushButton("👁️ Viewer")
-        self.viewer_btn.setFixedHeight(60)
-        self.viewer_btn.clicked.connect(self._toggle_viewer)
-        controls_layout.addWidget(self.viewer_btn, stretch=1)
-        
-        layout.addLayout(controls_layout)
-        
-        return panel
-    
-    def _create_right_panel(self) -> QFrame:
-        """Create the right panel with session info."""
-        panel = QFrame()
-        panel.setMinimumWidth(250)
-        panel.setMaximumWidth(350)
-        panel.setStyleSheet("""
-            QFrame {
-                background-color: #1a1a1a;
-                border: 1px solid #3d3d3d;
-                border-radius: 8px;
-            }
-        """)
-        
+
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
-        
-        # Panel title - minimal gold
-        title = QLabel("👤 Session Info")
-        title.setStyleSheet("""
-            font-size: 15px;
-            font-weight: bold;
-            color: #D4AF37;
-            padding: 5px;
-            border-bottom: 1px solid #3d3d3d;
+        layout.setSpacing(8)
+
+        # Preview container
+        preview_frame = QFrame()
+        preview_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: #000000;
+                border: 1px solid {BORDER};
+                border-radius: 3px;
+            }}
         """)
-        layout.addWidget(title)
-        
-        # Client name input - minimal styling
-        client_label = QLabel("Client Name:")
-        client_label.setStyleSheet("color: #aaaaaa; font-weight: bold;")
-        layout.addWidget(client_label)
-        
-        self.client_name_input = QLineEdit()
-        self.client_name_input.setPlaceholderText("Enter client name...")
-        self.client_name_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #252525;
-                color: #ffffff;
-                border: 1px solid #444;
+        preview_layout = QVBoxLayout(preview_frame)
+        preview_layout.setContentsMargins(1, 1, 1, 1)
+        preview_layout.setSpacing(0)
+
+        self.preview_label = QLabel("LIVE PREVIEW")
+        self.preview_label.setMinimumSize(640, 360)
+        from PyQt6.QtWidgets import QSizePolicy
+        self.preview_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding
+        )
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.setStyleSheet(f"""
+            background-color: #000000;
+            color: {TEXT_DIM};
+            font-size: 11px;
+            letter-spacing: 3px;
+        """)
+        preview_layout.addWidget(self.preview_label, stretch=1)
+
+        self.countdown_overlay = CountdownOverlay(self.preview_label)
+        self.countdown_overlay.countdown_finished.connect(self._on_countdown_finished)
+
+        layout.addWidget(preview_frame, stretch=1)
+
+        # Frame info bar
+        info_bar = QWidget()
+        info_bar.setFixedHeight(30)
+        info_bar.setStyleSheet(f"background: transparent;")
+        info_layout = QHBoxLayout(info_bar)
+        info_layout.setContentsMargins(4, 0, 4, 0)
+        info_layout.setSpacing(8)
+
+        self.selected_frame_label = QLabel("No frame selected")
+        self.selected_frame_label.setStyleSheet(f"color: {TEXT_SEC}; font-size: 11px; background: transparent;")
+        info_layout.addWidget(self.selected_frame_label)
+
+        info_layout.addStretch()
+
+        self.shot_status = QLabel("Ready")
+        self.shot_status.setStyleSheet(f"color: {GREEN}; font-size: 11px; font-weight: bold; background: transparent;")
+        info_layout.addWidget(self.shot_status)
+
+        layout.addWidget(info_bar)
+
+        # Controls row
+        controls_layout = QHBoxLayout()
+        controls_layout.setSpacing(8)
+
+        self.capture_btn = QPushButton("⬤  CAPTURE")
+        self.capture_btn.setFixedHeight(52)
+        self.capture_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {GOLD};
+                color: #000000;
+                border: none;
+                border-radius: 3px;
+                font-size: 15px;
+                font-weight: bold;
+                letter-spacing: 3px;
+            }}
+            QPushButton:hover {{ background-color: {GOLD_BRIGHT}; }}
+            QPushButton:pressed {{ background-color: {GOLD_DIM}; }}
+            QPushButton:disabled {{
+                background-color: #1a1a1a;
+                color: {TEXT_DIM};
+            }}
+        """)
+        self.capture_btn.clicked.connect(self._on_capture_clicked)
+        controls_layout.addWidget(self.capture_btn, stretch=3)
+
+        self.print_btn = _btn("⎙  PRINT", "ghost", 52)
+        self.print_btn.clicked.connect(self._on_print_clicked)
+        controls_layout.addWidget(self.print_btn, stretch=1)
+
+        self.viewer_btn = _btn("◉  VIEWER", "ghost", 52)
+        self.viewer_btn.clicked.connect(self._toggle_viewer)
+        controls_layout.addWidget(self.viewer_btn, stretch=1)
+
+        layout.addLayout(controls_layout)
+
+        return panel
+
+    def _create_right_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setMinimumWidth(240)
+        panel.setMaximumWidth(300)
+        panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {BG_PANEL};
+                border: 1px solid {BORDER};
                 border-radius: 4px;
-                padding: 8px;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border-color: #D4AF37;
-            }
+            }}
         """)
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        title = QLabel("SESSION")
+        title.setStyleSheet(PANEL_TITLE_STYLE)
+        layout.addWidget(title)
+        layout.addWidget(_divider())
+
+        # Client name
+        layout.addSpacing(2)
+        client_label = QLabel("CLIENT NAME")
+        client_label.setStyleSheet(LABEL_STYLE)
+        layout.addWidget(client_label)
+
+        self.client_name_input = QLineEdit()
+        self.client_name_input.setPlaceholderText("Enter name…")
+        self.client_name_input.setStyleSheet(INPUT_STYLE)
         layout.addWidget(self.client_name_input)
-        
-        # Payment status - minimal styling
-        payment_label = QLabel("Payment Status:")
-        payment_label.setStyleSheet("color: #aaaaaa; font-weight: bold;")
+
+        layout.addSpacing(6)
+
+        # Payment
+        payment_label = QLabel("PAYMENT")
+        payment_label.setStyleSheet(LABEL_STYLE)
         layout.addWidget(payment_label)
-        
+
         self.payment_combo = QComboBox()
         self.payment_combo.addItems(["Unpaid", "Paid", "Partial"])
-        self.payment_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #252525;
-                color: #ffffff;
-                border: 1px solid #444;
-                border-radius: 4px;
-                padding: 6px;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #252525;
-                color: #ffffff;
-                selection-background-color: #D4AF37;
-            }
-        """)
+        self.payment_combo.setStyleSheet(COMBO_STYLE)
         layout.addWidget(self.payment_combo)
-        
-        # Session stats - minimal styling
-        stats_frame = QFrame()
-        stats_frame.setStyleSheet("""
-            QFrame {
-                background-color: #252525;
-                border-radius: 4px;
-                padding: 8px;
-            }
+
+        layout.addSpacing(8)
+        layout.addWidget(_divider())
+        layout.addSpacing(6)
+
+        # Stats card
+        stats_card = QFrame()
+        stats_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {BG_CARD};
+                border: 1px solid {BORDER};
+                border-radius: 3px;
+                padding: 2px;
+            }}
         """)
-        stats_layout = QVBoxLayout(stats_frame)
-        
-        self.shots_taken_label = QLabel("Shots: 0 / 0")
-        self.shots_taken_label.setStyleSheet("color: #cccccc; font-size: 13px;")
+        stats_layout = QVBoxLayout(stats_card)
+        stats_layout.setContentsMargins(12, 10, 12, 10)
+        stats_layout.setSpacing(6)
+
+        self.shots_taken_label = QLabel("SHOTS  ·  0 / 0")
+        self.shots_taken_label.setStyleSheet(f"color: {TEXT_SEC}; font-size: 11px; background: transparent;")
         stats_layout.addWidget(self.shots_taken_label)
-        
-        self.amount_label = QLabel("Amount: ₱0")
-        self.amount_label.setStyleSheet("color: #4CAF50; font-size: 13px; font-weight: bold;")
+
+        self.amount_label = QLabel("AMOUNT  ·  ₱0")
+        self.amount_label.setStyleSheet(f"color: {GOLD}; font-size: 12px; font-weight: bold; background: transparent;")
         stats_layout.addWidget(self.amount_label)
-        
-        layout.addWidget(stats_frame)
-        
+
+        layout.addWidget(stats_card)
+        layout.addSpacing(12)
+
         # Action buttons
-        layout.addSpacing(20)
-        
-        new_session_btn = QPushButton("🆕 New Session")
-        new_session_btn.setFixedHeight(45)
+        new_session_btn = _btn("✦  NEW SESSION", "ghost", 36)
         new_session_btn.clicked.connect(self._on_new_session)
         layout.addWidget(new_session_btn)
-        
-        usb_export_btn = QPushButton("💾 USB Export")
-        usb_export_btn.setFixedHeight(45)
+
+        usb_export_btn = _btn("↓  USB EXPORT", "ghost", 36)
         usb_export_btn.clicked.connect(self._on_usb_export)
         layout.addWidget(usb_export_btn)
-        
-        csv_export_btn = QPushButton("📊 CSV Export")
-        csv_export_btn.setFixedHeight(45)
+
+        csv_export_btn = _btn("⊞  CSV EXPORT", "ghost", 36)
         csv_export_btn.clicked.connect(self._on_csv_export)
         layout.addWidget(csv_export_btn)
-        
+
         layout.addStretch()
-        
+
         return panel
-    
+
     def _create_bottom_panel(self) -> QFrame:
-        """Create the bottom panel with session log."""
         panel = QFrame()
-        panel.setMinimumHeight(200)
-        panel.setMaximumHeight(300)
-        panel.setStyleSheet("""
-            QFrame {
-                background-color: #1a1a1a;
-                border: 1px solid #3d3d3d;
-                border-radius: 8px;
-            }
+        panel.setMinimumHeight(190)
+        panel.setMaximumHeight(280)
+        panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {BG_PANEL};
+                border: 1px solid {BORDER};
+                border-radius: 4px;
+            }}
         """)
-        
+
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(5)
-        
-        # Panel title with button - minimal gold
-        header_layout = QHBoxLayout()
-        
-        title = QLabel("📋 Session Log")
-        title.setStyleSheet("""
-            font-size: 15px;
-            font-weight: bold;
-            color: #D4AF37;
-            padding: 5px;
-        """)
-        header_layout.addWidget(title)
-        
-        header_layout.addStretch()
-        
-        create_event_btn = QPushButton("➕ Create Event")
-        create_event_btn.setFixedHeight(35)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(8)
+
+        title = QLabel("SESSION LOG")
+        title.setStyleSheet(PANEL_TITLE_STYLE)
+        header.addWidget(title)
+        header.addStretch()
+
+        create_event_btn = _btn("＋  CREATE EVENT", "ghost", 28)
+        create_event_btn.setFixedWidth(140)
         create_event_btn.clicked.connect(self._on_create_event)
-        header_layout.addWidget(create_event_btn)
-        
-        load_event_btn = QPushButton("📂 Load Event")
-        load_event_btn.setFixedHeight(35)
+        header.addWidget(create_event_btn)
+
+        load_event_btn = _btn("⊙  LOAD EVENT", "ghost", 28)
+        load_event_btn.setFixedWidth(130)
         load_event_btn.clicked.connect(self._on_load_event)
-        header_layout.addWidget(load_event_btn)
-        
-        layout.addLayout(header_layout)
-        
-        # Session log table
+        header.addWidget(load_event_btn)
+
+        layout.addLayout(header)
+        layout.addWidget(_divider())
+
         self.session_log = SessionLogTable()
         self.session_log.reprint_requested.connect(self._on_reprint)
         self.session_log.delete_requested.connect(self._on_delete_session)
         self.session_log.edit_requested.connect(self._on_edit_session)
+        self.session_log.download_requested.connect(self._on_download_photo)
         layout.addWidget(self.session_log)
-        
+
         return panel
-    
+
+    # ── Theming ───────────────────────────────────────────────────────────────
+
     def _apply_theme(self):
-        """Apply the current theme (dark/light)."""
         if self.is_dark_mode:
             self.setStyleSheet(self._get_dark_stylesheet())
-            self.theme_btn.setText("🌙 Dark")
+            self.theme_btn.setText("◑  DARK")
         else:
             self.setStyleSheet(self._get_light_stylesheet())
-            self.theme_btn.setText("☀️ Light")
-    
+            self.theme_btn.setText("◐  LIGHT")
+
     def _get_dark_stylesheet(self) -> str:
-        """Get dark theme stylesheet - minimal professional."""
-        return """
-            QMainWindow {
-                background-color: #0a0a0a;
-            }
-            QWidget {
-                background-color: #1a1a1a;
-                color: #ffffff;
+        return f"""
+            QMainWindow {{ background-color: {BG_DEEP}; }}
+            QWidget {{
+                background-color: {BG_PANEL};
+                color: {TEXT_PRI};
                 font-family: 'Segoe UI', sans-serif;
-                font-size: 13px;
-            }
-            QPushButton {
-                background-color: #252525;
-                color: #cccccc;
-                border: 1px solid #444;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #333;
-                border-color: #D4AF37;
-                color: #D4AF37;
-            }
-            QPushButton:pressed {
-                background-color: #D4AF37;
-                color: #000000;
-            }
-            QLabel {
-                background-color: transparent;
-            }
-            QLineEdit {
-                background-color: #252525;
-                color: #ffffff;
-                border: 1px solid #444;
-                border-radius: 4px;
-                padding: 6px;
-            }
-            QComboBox {
-                background-color: #252525;
-                color: #ffffff;
-                border: 1px solid #444;
-                border-radius: 4px;
-                padding: 6px;
-            }
+                font-size: 12px;
+            }}
+            QLabel {{ background-color: transparent; }}
+            QSplitter::handle {{ background-color: {BORDER}; width: 1px; }}
         """
-    
+
     def _get_light_stylesheet(self) -> str:
-        """Get light theme stylesheet - minimal professional."""
         return """
-            QMainWindow {
-                background-color: #f5f5f5;
-            }
+            QMainWindow { background-color: #f0f0f0; }
             QWidget {
-                background-color: #ffffff;
-                color: #000000;
+                background-color: #fafafa;
+                color: #111111;
                 font-family: 'Segoe UI', sans-serif;
-                font-size: 13px;
+                font-size: 12px;
             }
+            QLabel { background-color: transparent; }
+            QSplitter::handle { background-color: #ddd; width: 1px; }
             QPushButton {
-                background-color: #f0f0f0;
+                background-color: #ebebeb;
                 color: #333;
                 border: 1px solid #ccc;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: bold;
+                border-radius: 3px;
+                padding: 6px 14px;
             }
-            QPushButton:hover {
-                background-color: #e0e0e0;
-                border-color: #D4AF37;
-                color: #8B6914;
-            }
-            QLabel {
-                background-color: transparent;
-            }
-            QLineEdit {
+            QPushButton:hover { background-color: #e0e0e0; border-color: #B8860B; color: #7a5c00; }
+            QLineEdit, QComboBox {
                 background-color: #ffffff;
-                color: #000000;
+                color: #111;
                 border: 1px solid #ccc;
-                border-radius: 4px;
-                padding: 6px;
-            }
-            QComboBox {
-                background-color: #ffffff;
-                color: #000000;
-                border: 1px solid #ccc;
-                border-radius: 4px;
+                border-radius: 3px;
                 padding: 6px;
             }
         """
-    
+
     def _toggle_theme(self):
-        """Toggle between dark and light themes."""
         try:
             self.is_dark_mode = not self.is_dark_mode
             self._apply_theme()
-            
-            # Update component styles - check if methods exist
             if hasattr(self.frame_selector, 'apply_stylesheet'):
                 self.frame_selector.apply_stylesheet()
             if hasattr(self.session_log, 'apply_stylesheet'):
                 self.session_log.apply_stylesheet()
-            
-            # Update theme button text
-            self.theme_btn.setText("🌙 Dark" if self.is_dark_mode else "☀️ Light")
-            
+            self.theme_btn.setText("◑  DARK" if self.is_dark_mode else "◐  LIGHT")
             print(f"[THEME] Changed to: {'Dark' if self.is_dark_mode else 'Light'}")
         except Exception as e:
             print(f"[ERROR] Theme toggle failed: {e}")
             import traceback
             traceback.print_exc()
-    
+
+    # ── Data Loading ──────────────────────────────────────────────────────────
+
     def _load_initial_data(self):
-        """Load initial data - check for existing events."""
-        # Check if there are any events
         events = self.session_manager.get_all_events()
         if events:
-            # Load the most recent event
             self._load_event(events[0]['id'])
         else:
-            # No events yet - show "Not Selected"
-            self.event_label.setText("Event: Not Selected")
+            self.event_label.setText("NO EVENT SELECTED")
             self.edit_event_btn.setVisible(False)
             self.delete_event_btn.setVisible(False)
-    
+
     def _initialize_camera(self):
-        """Initialize camera and start preview."""
         try:
-            # Detect and populate available cameras, but don't auto-start
-            # The camera will be started after UI is fully ready
             self._refresh_cameras(auto_start=False)
-            
-            # Now start the camera once
             if self.available_cameras:
                 selected_idx = self.camera_combo.currentIndex()
                 if selected_idx < 0:
                     selected_idx = 0
                     self.camera_combo.setCurrentIndex(0)
-                
                 camera_id = self.available_cameras[selected_idx][0]
                 self._start_camera(camera_id)
             else:
                 print("[CAMERA] No cameras detected - using mock mode")
-                self.shot_status.setText("No camera - Mock mode")
-            
+                self.shot_status.setText("No camera — mock mode")
         except Exception as e:
             print(f"[CAMERA] Error initializing: {e}")
-            self.shot_status.setText("Camera error - Mock mode")
-    
+            self.shot_status.setText("Camera error — mock mode")
+
     def _refresh_cameras(self, auto_start=True):
-        """Detect and populate available cameras in the dropdown.
-        
-        Args:
-            auto_start: Whether to automatically start the first camera (default True)
-        """
-        # Stop current camera if running
         was_running = self.camera_manager.is_running()
         current_camera_id = None
         if was_running:
             current_camera_id = self.camera_manager.current_camera_id
             self.camera_manager.stop_camera()
-        
-        # Detect available cameras
+
         self.available_cameras = self.camera_manager.detect_cameras()
-        
-        # Block signals to prevent triggering _on_camera_changed while populating
         self.camera_combo.blockSignals(True)
-        
-        # Clear and repopulate dropdown
         self.camera_combo.clear()
-        
+
         if self.available_cameras:
-            print(f"[CAMERA] Detected {len(self.available_cameras)} camera(s):")
             for idx, (cam_id, cam_name) in enumerate(self.available_cameras):
-                print(f"  - [{cam_id}] {cam_name}")
                 self.camera_combo.addItem(cam_name, cam_id)
-                
-                # Select previously used camera if available
                 if current_camera_id is not None and cam_id == current_camera_id:
                     self.camera_combo.setCurrentIndex(idx)
-            
-            # If no camera was selected, select the first one
             if self.camera_combo.currentIndex() < 0 and self.camera_combo.count() > 0:
                 self.camera_combo.setCurrentIndex(0)
-            
-            # Re-enable signals
             self.camera_combo.blockSignals(False)
-            
-            # Only auto-start if requested (prevents double-start on init)
             if auto_start:
-                # Start camera (either previous one or first available)
                 selected_idx = self.camera_combo.currentIndex()
                 camera_id = self.available_cameras[selected_idx][0]
                 self._start_camera(camera_id)
@@ -773,182 +767,154 @@ class OperatorWindow(QMainWindow):
             self.camera_combo.addItem("No cameras found")
             self.camera_combo.setEnabled(False)
             self.camera_combo.blockSignals(False)
-            print("[CAMERA] No cameras detected - using mock mode")
-            self.shot_status.setText("No camera - Mock mode")
-    
+            self.shot_status.setText("No camera — mock mode")
+
     def _start_camera(self, camera_id: int):
-        """Start camera with given ID."""
-        # Stop any existing camera
         self.camera_manager.stop_camera()
-        
-        # Start camera with 30 FPS for smoothness
         self.camera_manager.start_camera(
             camera_id=camera_id,
             fps=30,
             frame_callback=self._on_camera_frame,
             capture_callback=self._on_photo_captured
         )
-        
-        # Start preview timer
         if not self.preview_timer.isActive():
             self.preview_timer.start()
-        
-        self.shot_status.setText("Camera connected - Ready")
+        self.shot_status.setText("Camera connected")
         print(f"[CAMERA] Started camera {camera_id}")
-    
+
     def _on_camera_changed(self, index: int):
-        """Handle camera selection change from dropdown."""
         if index < 0 or not self.available_cameras:
             return
-        
-        # Get selected camera ID
         camera_id = self.camera_combo.currentData()
         if camera_id is None:
             return
-        
-        # Don't switch if same camera
         if self.camera_manager.is_running() and self.camera_manager.current_camera_id == camera_id:
             return
-        
         print(f"[CAMERA] Switching to camera {camera_id}")
-        self.shot_status.setText(f"Switching camera...")
-        
-        # Start the selected camera
         self._start_camera(camera_id)
-    
+
     def _on_camera_frame(self, jpeg_bytes: bytes):
-        """Handle camera frame for preview."""
         self.current_frame_bytes = jpeg_bytes
-    
+
     def _update_preview(self):
-        """Update preview label with current frame - show full image."""
         if hasattr(self, 'current_frame_bytes') and self.current_frame_bytes:
-            # ALWAYS show live preview (even during review)
             pixmap = QPixmap()
             pixmap.loadFromData(self.current_frame_bytes)
             if not pixmap.isNull():
-                # Get label size
                 label_size = self.preview_label.size()
-                
-                # Scale to fit within container while showing FULL image (no cropping)
                 scaled = pixmap.scaled(
                     label_size.width(),
                     label_size.height(),
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation
                 )
-                
+                if hasattr(self, 'frame_overlay_pixmap') and self.frame_overlay_pixmap and not self.frame_overlay_pixmap.isNull():
+                    final_pixmap = QPixmap(scaled)
+                    painter = QPainter(final_pixmap)
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    overlay_scaled = self.frame_overlay_pixmap.scaled(
+                        final_pixmap.width(), final_pixmap.height(),
+                        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    x = (final_pixmap.width() - overlay_scaled.width()) // 2
+                    y = (final_pixmap.height() - overlay_scaled.height()) // 2
+                    painter.drawPixmap(x, y, overlay_scaled)
+                    painter.end()
+                    scaled = final_pixmap
                 self.preview_label.setPixmap(scaled)
                 self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                
-                # Also update viewer window with live preview
                 if self.viewer_window and not self.viewer_window.is_showing_final:
                     self.viewer_window.update_live_preview(self.current_frame_bytes)
-    
+
+    # ── Photo Capture ─────────────────────────────────────────────────────────
+
     def _on_photo_captured(self, photo_path: str):
-        """Handle captured photo from camera."""
         print(f"[CAMERA] Photo captured: {photo_path}")
-        
-        # Add to captured photos
-        self.captured_photos.append(photo_path)
+
+        processed_path = photo_path
+        if hasattr(self, 'current_frame_image_path') and self.current_frame_image_path:
+            if hasattr(self, 'current_frame_metadata') and self.current_frame_metadata:
+                self.compositor.load_frame(self.current_frame_image_path, self.current_frame_metadata)
+                from pathlib import Path
+                output_dir = Path("events") / "output"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                import datetime
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                client_name = getattr(self, 'current_client_name', 'Guest')
+                processed_path = str(output_dir / f"{client_name}_{timestamp}.jpg")
+                if self.compositor.composite_photos([photo_path], processed_path):
+                    print(f"[COMPOSITE] Photo composited: {processed_path}")
+                else:
+                    processed_path = photo_path
+
+        self.captured_photos.append(processed_path)
         self.current_slot_index += 1
-        
-        # Save photo to database
+
         if hasattr(self, 'current_session_id') and self.current_session_id:
             self.session_manager.add_photo(
                 self.current_session_id,
                 slot_number=self.current_slot_index,
-                raw_path=photo_path
+                raw_path=photo_path,
+                processed_path=processed_path if processed_path != photo_path else None
             )
-            
-            # Update session with shot count
-            self.session_manager.update_session(
-                self.current_session_id,
-                shots_taken=self.current_slot_index
-            )
-        
-        # Show small review overlay (live preview continues!)
-        self._show_photo_overlay(photo_path)
-        
-        # Update viewer with final photo
+            self.session_manager.update_session(self.current_session_id, shots_taken=self.current_slot_index)
+
+        self._show_photo_overlay(processed_path)
+
         if self.viewer_window:
-            self.viewer_window.show_final_photo(photo_path)
-        
-        # Update session log
+            self.viewer_window.show_final_photo(processed_path)
+
         self._load_sessions_for_event(self.current_event_id)
-        
-        # Update shots label
-        self.shots_taken_label.setText(f"Shots: {self.current_slot_index}")
-        
-        # Clear overlay after 3 seconds
+        self.shots_taken_label.setText(f"SHOTS  ·  {self.current_slot_index}")
         self.review_timer.start(3000)
-    
+
     def _show_photo_overlay(self, photo_path: str):
-        """Show small captured photo overlay on top of live preview."""
         self.preview_mode = "review"
-        self.shot_status.setText(f"✓ Photo {self.current_slot_index} captured!")
-        
-        # Create small thumbnail overlay (clients can still see live preview)
-        pixmap = QPixmap(photo_path)
-        if not pixmap.isNull():
-            # Scale to small thumbnail (20% of preview size)
-            thumb_size = min(self.preview_label.width(), self.preview_label.height()) // 5
-            thumb = pixmap.scaled(
-                thumb_size, thumb_size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            # Position in bottom-right corner
-            # Note: This is simplified - in full implementation, use a separate QLabel overlay
-            print(f"[UI] Showing photo thumbnail overlay: {photo_path}")
-    
-    # === EVENT HANDLERS ===
-    
+        self.shot_status.setText(f"✓  Photo {self.current_slot_index} captured")
+        print(f"[UI] Photo overlay: {photo_path}")
+
+    # ── Event Handlers ────────────────────────────────────────────────────────
+
     def _on_frame_selected(self, frame_id: int, metadata: dict, image_path: str):
-        """Handle frame selection."""
         self.current_frame_id = frame_id
         self.current_frame_metadata = metadata
-        
+        self.current_frame_image_path = image_path
+
         frame_name = metadata.get('frame_name', 'Unknown')
         slots = metadata.get('slots', 2)
         price = metadata.get('price', 0)
-        
-        self.selected_frame_label.setText(f"Frame: {frame_name} ({slots} shots)")
-        self.shot_status.setText(f"Ready - {slots} shots remaining")
-        
-        # Update amount label
-        self.amount_label.setText(f"Amount: ₱{price:.0f}")
-        
-        # Update viewer if open
+
+        self.selected_frame_label.setText(f"{frame_name}  ·  {slots} shots")
+        self.shot_status.setText(f"Ready  ·  {slots} shots")
+        self.amount_label.setText(f"AMOUNT  ·  ₱{price:.0f}")
+
+        if image_path:
+            self.frame_overlay_pixmap = QPixmap(image_path)
+        else:
+            self.frame_overlay_pixmap = None
+
         if self.viewer_window:
             self.viewer_window.set_frame_overlay(image_path)
-    
+
     def _on_frame_deleted(self, frame_id: int):
-        """Handle frame deletion."""
         self.session_manager.delete_frame(frame_id)
         self.frame_selector.load_frames_for_event(self.current_event_id)
-        print(f"[FRAME] Frame {frame_id} deleted")
-    
+
     def _on_frame_edit(self, frame_id: int, new_name: str):
-        """Handle frame edit."""
         self.session_manager.update_frame(frame_id, name=new_name)
         self.frame_selector.load_frames_for_event(self.current_event_id)
-        print(f"[FRAME] Frame {frame_id} renamed to '{new_name}'")
-    
+
     def _on_capture_clicked(self):
-        """Handle capture button click."""
         if not self.current_event_id:
             QMessageBox.warning(self, "No Event", "Please create or load an event first.")
             return
-        
         if not self.current_frame_id:
             QMessageBox.warning(self, "No Frame", "Please select a frame first.")
             return
-        
         if self.is_countdown_active:
             return
-        
-        # Create a new session if needed
+
         if not hasattr(self, 'current_session_id') or self.current_session_id is None:
             client_name = self.client_name_input.text()
             self.current_session_id = self.session_manager.create_session(
@@ -956,224 +922,169 @@ class OperatorWindow(QMainWindow):
                 client_name=client_name,
                 frame_id=self.current_frame_id
             )
-            print(f"[SESSION] Created session {self.current_session_id}")
-        
+
         self.is_countdown_active = True
         self.capture_btn.setEnabled(False)
-        
-        # Start countdown
         self.preview_mode = "countdown"
         self.countdown_overlay.start_countdown(3)
-        
-        # Update viewer
+
         if self.viewer_window:
             self.viewer_window.show_countdown(3)
-        
-        print("[CAPTURE] Capture initiated - countdown started")
-    
+
     def _on_countdown_finished(self):
-        """Handle countdown completion."""
-        # Trigger actual photo capture
         self._trigger_capture()
-    
+
     def _trigger_capture(self):
-        """Trigger actual photo capture."""
         from datetime import datetime
         from pathlib import Path
-        
-        # Generate output path
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         client_name = self.client_name_input.text() or "Anonymous"
         output_dir = Path("events/raw")
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = str(output_dir / f"capture_{timestamp}.jpg")
-        
+
         if self.camera_manager.is_running():
-            # Use real camera
             success = self.camera_manager.capture_photo(output_path)
             if success:
                 self.preview_mode = "review"
-                self.shot_status.setText("Capturing...")
-                print(f"[CAMERA] Capture triggered: {output_path}")
             else:
                 self._mock_capture(output_path)
         else:
-            # Use mock capture
             self._mock_capture(output_path)
-    
+
     def _mock_capture(self, output_path: str):
-        """Create mock capture when camera unavailable."""
-        # Create a mock image
         from PIL import Image, ImageDraw
-        
-        img = Image.new('RGB', (1280, 720), color=(100, 150, 200))
+        img = Image.new('RGB', (1280, 720), color=(20, 20, 20))
         draw = ImageDraw.Draw(img)
-        draw.text((640, 360), "Mock Capture", fill=(255, 255, 255))
+        draw.text((640, 360), "Mock Capture", fill=(212, 175, 55))
         img.save(output_path)
-        
-        # Simulate the capture callback
         self._on_photo_captured(output_path)
-        print(f"[MOCK] Photo saved: {output_path}")
-    
+
     def _show_captured_photo_review(self, photo_path: str):
-        """Show captured photo for review."""
-        # Load and display actual captured photo
         pixmap = QPixmap(photo_path)
         if pixmap.isNull():
-            # Fallback to mock display if image can't be loaded
             pixmap = QPixmap(600, 450)
-            pixmap.fill(QColor("#2d2d2d"))
-            
+            pixmap.fill(QColor(BG_CARD))
             painter = QPainter(pixmap)
-            painter.setPen(QColor("#FFD700"))
-            font = QFont("Segoe UI", 24)
+            painter.setPen(QColor(GOLD))
+            font = QFont("Georgia", 20)
             painter.setFont(font)
-            painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, 
-                            f"📷 Captured Photo\n(Mock)\n\nReviewing...")
+            painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "✓  Captured")
             painter.end()
         else:
-            # Scale to fit preview area
             pixmap = pixmap.scaled(
                 self.preview_label.size(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
-        
         self.preview_label.setPixmap(pixmap)
-        self.shot_status.setText("Photo captured - Reviewing (3s)...")
-    
+
     def _return_to_live_preview(self):
-        """Clear review overlay - live preview never stops."""
         self.preview_mode = "live"
         self.is_countdown_active = False
         self.capture_btn.setEnabled(True)
-        
-        # Live preview continues - just update status
-        self.shot_status.setText("Ready to capture")
-        
-        # Reset viewer
+        self.shot_status.setText("Ready")
         if self.viewer_window:
             self.viewer_window.show_idle_screen()
-        
-        print("[MOCK] Returned to live preview")
-    
+
     def _on_print_clicked(self):
-        """Handle print button click."""
-        dialog = PrintDialog(parent=self)
+        photo_path = None
+        if hasattr(self, 'captured_photos') and self.captured_photos:
+            photo_path = self.captured_photos[-1]
+        elif hasattr(self, 'current_session_id') and self.current_session_id:
+            photos = self.session_manager.get_photos_for_session(self.current_session_id)
+            if photos:
+                photo_path = photos[-1].get('processed_path') or photos[-1].get('raw_path')
+
+        dialog = PrintDialog(photo_path=photo_path, parent=self)
         if dialog.exec() == PrintDialog.DialogCode.Accepted:
             settings = dialog.get_print_settings()
-            print(f"[MOCK] Print settings: {settings}")
-    
+            print(f"[PRINT] Settings: {settings}")
+
     def _toggle_viewer(self):
-        """Toggle viewer window visibility."""
         if not self.viewer_window:
             self.viewer_window = ViewerWindow()
-        
         if self.viewer_window.isVisible():
             self.viewer_window.hide()
-            self.viewer_btn.setText("👁️ Viewer")
+            self.viewer_btn.setText("◉  VIEWER")
         else:
             self.viewer_window.show()
-            self.viewer_btn.setText("👁️ Hide Viewer")
+            self.viewer_btn.setText("◎  HIDE")
+            if hasattr(self, 'current_frame_image_path') and self.current_frame_image_path:
+                self.viewer_window.set_frame_overlay(self.current_frame_image_path)
             self.viewer_window.show_idle_screen()
-    
+
     def _on_new_session(self):
-        """Handle new session button."""
         self.client_name_input.clear()
         self.payment_combo.setCurrentIndex(0)
         self.captured_photos.clear()
         self.current_slot_index = 0
-        self.shots_taken_label.setText("Shots: 0 / 0")
-        self.amount_label.setText("Amount: ₱0")
+        self.shots_taken_label.setText("SHOTS  ·  0 / 0")
+        self.amount_label.setText("AMOUNT  ·  ₱0")
         self.current_session_id = None
-        print("[SESSION] New session form cleared")
-    
+
     def _on_usb_export(self):
-        """Handle USB export button."""
         if not self.current_event_id:
             QMessageBox.warning(self, "No Event", "Please select an event first.")
             return
-        
         from core.usb_exporter import USBExporter
         exporter = USBExporter(self)
         exporter.export_event(self.current_event_id, self.session_manager)
-    
+
     def _on_csv_export(self):
-        """Handle CSV export button."""
         if not self.current_event_id:
             QMessageBox.warning(self, "No Event", "Please select an event first.")
             return
-        
         from core.csv_export import CSVExporter
         exporter = CSVExporter(self)
         exporter.export_sessions(self.current_event_id, self.session_manager)
-    
+
     def _on_create_event(self):
-        """Handle create event button."""
         name, ok = QInputDialog.getText(self, "Create Event", "Event name:")
         if ok and name:
             from datetime import datetime
             date = datetime.now().strftime("%Y-%m-%d")
-            
-            # Create event in database
             event_id = self.session_manager.create_event(name, date)
             self._load_event(event_id)
-            
-            print(f"[EVENT] Event created: {name} (ID: {event_id})")
-    
+
     def _on_load_event(self):
-        """Handle load event button."""
-        # Get real events from database
         events = self.session_manager.get_all_events()
-        
         if not events:
-            QMessageBox.information(self, "No Events", "No events found. Create an event first.")
+            QMessageBox.information(self, "No Events", "No events found. Create one first.")
             return
-        
-        # Format events for display
-        event_items = []
-        for event in events:
-            display = f"{event['name']} ({event['date']})"
-            event_items.append((display, event['id']))
-        
+
+        event_items = [(f"{e['name']} ({e['date']})", e['id']) for e in events]
         event_names = [item[0] for item in event_items]
-        
-        selected, ok = QInputDialog.getItem(
-            self, "Load Event", "Select event:", event_names, 0, False
-        )
-        
+
+        selected, ok = QInputDialog.getItem(self, "Load Event", "Select event:", event_names, 0, False)
         if ok and selected:
-            # Find the event ID
             event_id = next(item[1] for item in event_items if item[0] == selected)
             self._load_event(event_id)
-            print(f"[EVENT] Event loaded: {selected}")
-    
+
     def _load_event(self, event_id: int):
-        """Load an event by ID."""
         event = self.session_manager.get_event(event_id)
         if not event:
             QMessageBox.warning(self, "Error", "Event not found.")
             return
-        
+
         self.current_event_id = event_id
-        self.event_label.setText(f"Event: {event['name']}")
-        
-        # Show event management buttons
+        self.event_label.setText(event['name'].upper())
         self.edit_event_btn.setVisible(True)
         self.delete_event_btn.setVisible(True)
-        
-        # Load frames for this event
-        self.frame_selector.load_frames_for_event(event_id)
-        
-        # Load sessions for this event
+        self.frame_selector.set_event_id(event_id)
         self._load_sessions_for_event(event_id)
-    
+
     def _load_sessions_for_event(self, event_id: int):
-        """Load sessions for the current event."""
         self.session_log.clear_sessions()
         sessions = self.session_manager.get_sessions_for_event(event_id)
-        
+
         for session in sessions:
+            photos = self.session_manager.get_photos_for_session(session['id'])
+            photo_path = None
+            if photos:
+                photo_path = photos[-1].get('processed_path') or photos[-1].get('raw_path')
+
             self.session_log.add_session(
                 session_id=session['id'],
                 client_name=session['client_name'] or "Anonymous",
@@ -1182,125 +1093,126 @@ class OperatorWindow(QMainWindow):
                 payment_status=session['payment_status'] or 'Unpaid',
                 shots=session['shots_taken'] or 0,
                 status=session['status'] or 'Active',
-                timestamp=session['created_at'].split(' ')[1] if ' ' in str(session['created_at']) else ''
+                timestamp=session['created_at'].split(' ')[1] if ' ' in str(session['created_at']) else '',
+                photo_path=photo_path
             )
-    
+
     def _edit_current_event(self):
-        """Edit current event."""
         if not self.current_event_id:
             return
-        
         event = self.session_manager.get_event(self.current_event_id)
         if not event:
             return
-        
-        new_name, ok = QInputDialog.getText(
-            self, "Edit Event", "Event name:", text=event['name']
-        )
-        
+        new_name, ok = QInputDialog.getText(self, "Edit Event", "Event name:", text=event['name'])
         if ok and new_name:
             self.session_manager.update_event(self.current_event_id, name=new_name)
-            self.event_label.setText(f"Event: {new_name}")
-            print(f"[EVENT] Event renamed to: {new_name}")
-    
+            self.event_label.setText(new_name.upper())
+
     def _delete_current_event(self):
-        """Delete current event."""
         if not self.current_event_id:
             return
-        
         event = self.session_manager.get_event(self.current_event_id)
         event_name = event['name'] if event else "this event"
-        
+
         reply = QMessageBox.question(
-            self,
-            "Delete Event",
-            f"Are you sure you want to delete '{event_name}'?\n\nThis will delete all sessions, photos, and frames associated with this event.\n\nThis action cannot be undone.",
+            self, "Delete Event",
+            f"Delete '{event_name}'?\n\nAll sessions, photos and frames will be removed.\nThis cannot be undone.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        
+
         if reply == QMessageBox.StandardButton.Yes:
             self.session_manager.delete_event(self.current_event_id)
             self.current_event_id = None
-            self.event_label.setText("Event: Not Selected")
+            self.event_label.setText("NO EVENT SELECTED")
             self.edit_event_btn.setVisible(False)
             self.delete_event_btn.setVisible(False)
             self.frame_selector.clear_frames()
             self.session_log.clear_sessions()
-            print(f"[EVENT] Event deleted: {event_name}")
-    
+
     def _on_reprint(self, session_id: int):
-        """Handle reprint request."""
         session = self.session_manager.get_session(session_id)
         if not session:
             QMessageBox.warning(self, "Error", "Session not found.")
             return
-        
-        # Get photos for this session
         photos = self.session_manager.get_photos_for_session(session_id)
         if not photos:
-            QMessageBox.information(self, "No Photos", "No photos found for this session.")
+            QMessageBox.information(self, "No Photos", "No photos in this session.")
             return
-        
-        # Open print dialog with the last photo
         from ui.print_dialog import PrintDialog
         dialog = PrintDialog(photos[-1].get('processed_path') or photos[-1].get('raw_path'), parent=self)
         if dialog.exec() == PrintDialog.DialogCode.Accepted:
             settings = dialog.get_print_settings()
-            print(f"[PRINT] Reprint session {session_id} with settings: {settings}")
-    
+
     def _on_delete_session(self, session_id: int):
-        """Handle session deletion."""
         reply = QMessageBox.question(
-            self,
-            "Delete Session",
-            f"Delete session {session_id}?\n\nThis will also delete all photos associated with this session.",
+            self, "Delete Session",
+            f"Delete session {session_id}?\n\nAll associated photos will be removed.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        
         if reply == QMessageBox.StandardButton.Yes:
             self.session_manager.delete_session(session_id)
             self._load_sessions_for_event(self.current_event_id)
-            print(f"[SESSION] Session {session_id} deleted")
-    
+
     def _on_edit_session(self, session_id: int):
-        """Handle session edit."""
         session = self.session_manager.get_session(session_id)
         if not session:
             return
-        
         new_name, ok = QInputDialog.getText(
             self, "Edit Session", "Client name:", text=session['client_name'] or ""
         )
-        
         if ok:
             self.session_manager.update_session(session_id, client_name=new_name)
             self._load_sessions_for_event(self.current_event_id)
-            print(f"[SESSION] Session {session_id} client renamed to: {new_name}")
-    
-    def _show_settings(self):
-        """Show settings dialog."""
-        QMessageBox.information(
-            self,
-            "Settings",
-            "Settings dialog will be implemented here.\n\n(UI Test Mode)"
+
+    def _on_download_photo(self, session_id: int):
+        from pathlib import Path
+        photos = self.session_manager.get_photos_for_session(session_id)
+        if not photos:
+            QMessageBox.information(self, "No Photos", "No photos in this session.")
+            return
+
+        photo = photos[-1]
+        photo_path = photo.get('processed_path') or photo.get('raw_path')
+
+        if not photo_path or not Path(photo_path).exists():
+            QMessageBox.warning(self, "Error", "Photo file not found.")
+            return
+
+        default_name = Path(photo_path).stem + ".png"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Photo as PNG", default_name, "PNG Images (*.png)"
         )
-    
+
+        if not save_path:
+            return
+
+        try:
+            from PIL import Image
+            img = Image.open(photo_path)
+            if img.mode in ('RGBA', 'LA', 'P'):
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                if img.mode in ('RGBA', 'LA'):
+                    background.paste(img, mask=img.split()[-1])
+                    img = background
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            img.save(save_path, 'PNG')
+            QMessageBox.information(self, "Saved", f"Photo saved:\n{save_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save:\n{str(e)}")
+
+    def _show_settings(self):
+        QMessageBox.information(self, "Settings", "Settings will be implemented here.")
+
     def closeEvent(self, event):
-        """Handle window close."""
-        # Stop camera
         if self.camera_manager:
             self.camera_manager.stop_camera()
-        
-        # Stop preview timer
         if self.preview_timer:
             self.preview_timer.stop()
-        
-        # Close database
         if self.session_manager:
             self.session_manager.close()
-        
-        # Close viewer window
         if self.viewer_window:
             self.viewer_window.close()
-        
         event.accept()

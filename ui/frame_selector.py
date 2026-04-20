@@ -7,55 +7,59 @@ from PyQt6.QtWidgets import (
     QScrollArea, QGridLayout, QFrame, QMenu
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap, QPainter, QColor
+from PyQt6.QtGui import QPixmap, QPainter, QColor, QLinearGradient, QFont, QPen
 
 
 class FrameSelector(QWidget):
     """Frame selection widget with thumbnail grid."""
-    
-    frame_selected = pyqtSignal(int, dict, str)  # frame_id, metadata, image_path
-    frame_deleted = pyqtSignal(int)  # frame_id
-    frame_edit_requested = pyqtSignal(int, str)  # frame_id, new_name
-    
+
+    frame_selected = pyqtSignal(int, dict, str)
+    frame_deleted = pyqtSignal(int)
+    frame_edit_requested = pyqtSignal(int, str)
+
     def __init__(self):
         super().__init__()
-        
-        self.frames = {}  # frame_id -> metadata
+
+        self.frames = {}
         self.selected_frame_id = None
         self.event_id = None
-        
+
         self._setup_ui()
-    
+
     def _setup_ui(self):
-        """Setup the UI layout."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
-        
-        # Header
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        # Header row
         header_layout = QHBoxLayout()
-        
-        self.title_label = QLabel("📷 Available Frames")
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.title_label = QLabel("FRAMES")
         self.title_label.setStyleSheet("""
-            font-size: 16px;
+            font-family: 'Segoe UI';
+            font-size: 11px;
             font-weight: bold;
-            color: #FFD700;
-            padding: 5px;
+            color: #D4AF37;
+            letter-spacing: 4px;
+            padding: 4px 0px;
+            background: transparent;
         """)
         header_layout.addWidget(self.title_label)
-        
         header_layout.addStretch()
-        
-        # Add frame button
-        self.add_btn = QPushButton("+ Add Frame")
+
+        self.add_btn = QPushButton("＋ ADD")
+        self.add_btn.setFixedHeight(28)
         self.add_btn.setStyleSheet("""
             QPushButton {
-                background-color: #2d2d2d;
-                color: #FFD700;
-                border: 2px solid #D4AF37;
-                border-radius: 6px;
-                padding: 8px 16px;
+                background-color: transparent;
+                color: #D4AF37;
+                border: 1px solid #D4AF37;
+                border-radius: 3px;
+                padding: 2px 10px;
+                font-size: 10px;
                 font-weight: bold;
+                letter-spacing: 2px;
             }
             QPushButton:hover {
                 background-color: #D4AF37;
@@ -64,10 +68,16 @@ class FrameSelector(QWidget):
         """)
         self.add_btn.clicked.connect(self._on_add_frame)
         header_layout.addWidget(self.add_btn)
-        
+
         layout.addLayout(header_layout)
-        
-        # Scroll area for frame grid
+
+        # Divider
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet("background-color: #2a2a2a;")
+        layout.addWidget(divider)
+
+        # Scroll area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("""
@@ -76,50 +86,54 @@ class FrameSelector(QWidget):
                 background-color: transparent;
             }
             QScrollBar:vertical {
-                background-color: #1a1a1a;
-                width: 12px;
+                background-color: #111;
+                width: 6px;
+                border-radius: 3px;
             }
             QScrollBar::handle:vertical {
                 background-color: #D4AF37;
-                border-radius: 6px;
+                border-radius: 3px;
+                min-height: 20px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
             }
         """)
-        
-        # Grid container
+
         self.grid_container = QWidget()
+        self.grid_container.setStyleSheet("background: transparent;")
         self.grid_layout = QGridLayout(self.grid_container)
-        self.grid_layout.setSpacing(15)
-        self.grid_layout.setContentsMargins(5, 5, 5, 5)
-        
+        self.grid_layout.setSpacing(10)
+        self.grid_layout.setContentsMargins(2, 4, 2, 4)
+
         scroll.setWidget(self.grid_container)
         layout.addWidget(scroll)
-        
-        # Status label
+
+        # Status bar
         self.status_label = QLabel("Select a frame to begin")
         self.status_label.setStyleSheet("""
-            color: #888;
-            font-size: 12px;
-            padding: 5px;
+            color: #555;
+            font-size: 10px;
+            letter-spacing: 1px;
+            padding: 3px 0px;
+            background: transparent;
         """)
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.status_label)
-    
+
     def set_event_id(self, event_id: int):
-        """Set current event and load its frames."""
         self.event_id = event_id
         self.load_frames_for_event(event_id)
-    
+
     def load_frames_for_event(self, event_id: int):
-        """Load frames for a specific event from database."""
         self.clear_frames()
-        
-        # Import here to avoid circular dependency
+
         from core.session_manager import SessionManager
         session_manager = SessionManager()
-        
+
         try:
             frames = session_manager.get_frames_for_event(event_id)
-            
+
             for frame_data in frames:
                 self.add_frame(
                     frame_id=frame_data["id"],
@@ -128,15 +142,14 @@ class FrameSelector(QWidget):
                     price=frame_data["price"],
                     image_path=frame_data.get("image_path", "")
                 )
-            
+
             self.status_label.setText(f"{len(frames)} frames available")
         finally:
             session_manager.close()
-    
+
     def load_mock_frames(self):
-        """Load mock frame data for testing."""
         self.clear_frames()
-        
+
         mock_frames = [
             {"id": 1, "name": "Classic Gold Frame", "slots": 2, "price": 500},
             {"id": 2, "name": "Floral Border", "slots": 1, "price": 500},
@@ -144,7 +157,7 @@ class FrameSelector(QWidget):
             {"id": 4, "name": "Vintage Style", "slots": 3, "price": 600},
             {"id": 5, "name": "Elegant Black", "slots": 2, "price": 550},
         ]
-        
+
         for frame_data in mock_frames:
             self.add_frame(
                 frame_id=frame_data["id"],
@@ -152,134 +165,156 @@ class FrameSelector(QWidget):
                 slots=frame_data["slots"],
                 price=frame_data["price"]
             )
-        
+
         self.status_label.setText(f"{len(mock_frames)} frames available")
-    
-    def add_frame(self, frame_id: int, name: str, slots: int = 2, price: float = 500):
-        """Add a frame to the grid."""
+
+    def add_frame(self, frame_id: int, name: str, slots: int = 2, price: float = 500, image_path: str = ""):
         metadata = {
             'frame_id': frame_id,
             'frame_name': name,
             'slots': slots,
-            'price': price
+            'price': price,
+            'image_path': image_path
         }
         self.frames[frame_id] = metadata
-        
-        # Create frame card
+
         card = self._create_frame_card(frame_id, metadata)
-        
-        # Add to grid
+
         row = (len(self.frames) - 1) // 2
         col = (len(self.frames) - 1) % 2
         self.grid_layout.addWidget(card, row, col)
-    
+
     def _create_frame_card(self, frame_id: int, metadata: dict) -> QFrame:
-        """Create a frame selection card."""
+        is_selected = (frame_id == self.selected_frame_id)
+
         card = QFrame()
-        card.setFixedSize(180, 220)
+        card.setFixedSize(148, 190)
         card.setCursor(Qt.CursorShape.PointingHandCursor)
-        card.setStyleSheet("""
-            QFrame {
-                background-color: #2d2d2d;
-                border: 2px solid #D4AF37;
-                border-radius: 10px;
-            }
-            QFrame:hover {
-                background-color: #3d3d3d;
-                border: 3px solid #FFD700;
-            }
+
+        border_color = "#D4AF37" if is_selected else "#2e2e2e"
+        bg_color = "#1e1a0e" if is_selected else "#191919"
+
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {bg_color};
+                border: 1px solid {border_color};
+                border-radius: 6px;
+            }}
         """)
-        
+
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
-        
-        # Thumbnail placeholder
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(5)
+
+        # Thumbnail
         thumb = QLabel()
-        thumb.setFixedSize(150, 120)
+        thumb.setFixedSize(132, 100)
         thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Create placeholder image with frame number
-        pixmap = self._create_placeholder_thumbnail(frame_id, metadata['frame_name'])
-        thumb.setPixmap(pixmap)
         thumb.setStyleSheet("""
-            background-color: #1a1a1a;
-            border-radius: 6px;
+            background-color: #0d0d0d;
+            border-radius: 4px;
         """)
+
+        image_path = metadata.get('image_path', '')
+        if image_path:
+            pixmap = QPixmap(image_path)
+            if not pixmap.isNull():
+                pixmap = pixmap.scaled(132, 100,
+                                       Qt.AspectRatioMode.KeepAspectRatio,
+                                       Qt.TransformationMode.SmoothTransformation)
+            else:
+                pixmap = self._create_placeholder_thumbnail(frame_id, metadata['frame_name'])
+        else:
+            pixmap = self._create_placeholder_thumbnail(frame_id, metadata['frame_name'])
+
+        thumb.setPixmap(pixmap)
         layout.addWidget(thumb, alignment=Qt.AlignmentFlag.AlignCenter)
-        
-        # Frame name
+
+        # Name
         name_label = QLabel(metadata['frame_name'])
         name_label.setWordWrap(True)
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_label.setStyleSheet("""
-            color: #FFD700;
-            font-weight: bold;
-            font-size: 12px;
+            color: #e8e8e8;
+            font-weight: 600;
+            font-size: 11px;
+            background: transparent;
         """)
         layout.addWidget(name_label)
-        
-        # Slots info
-        slots_label = QLabel(f"📷 {metadata['slots']} shot{'s' if metadata['slots'] > 1 else ''}")
-        slots_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        slots_label.setStyleSheet("color: #aaa; font-size: 11px;")
-        layout.addWidget(slots_label)
-        
-        # Price
+
+        # Slots + price row
+        meta_row = QHBoxLayout()
+        meta_row.setContentsMargins(0, 0, 0, 0)
+        meta_row.setSpacing(4)
+
+        slots_label = QLabel(f"✦ {metadata['slots']} shots")
+        slots_label.setStyleSheet("color: #666; font-size: 9px; background: transparent;")
+        meta_row.addWidget(slots_label)
+
+        meta_row.addStretch()
+
         price_label = QLabel(f"₱{metadata['price']:.0f}")
-        price_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        price_label.setStyleSheet("color: #27ae60; font-weight: bold; font-size: 13px;")
-        layout.addWidget(price_label)
-        
-        # Store reference
+        price_label.setStyleSheet("color: #D4AF37; font-weight: bold; font-size: 10px; background: transparent;")
+        meta_row.addWidget(price_label)
+
+        layout.addLayout(meta_row)
+
         card.setProperty("frame_id", frame_id)
         card.mousePressEvent = lambda e, fid=frame_id: self._on_frame_clicked(fid)
-        
-        # Context menu
+
         card.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         card.customContextMenuRequested.connect(
             lambda pos, fid=frame_id: self._show_context_menu(pos, fid)
         )
-        
+
         return card
-    
+
     def _create_placeholder_thumbnail(self, frame_id: int, name: str) -> QPixmap:
-        """Create a placeholder thumbnail image."""
-        pixmap = QPixmap(150, 120)
-        pixmap.fill(QColor("#1a1a1a"))
-        
+        pixmap = QPixmap(132, 100)
+        pixmap.fill(QColor("#0d0d0d"))
+
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Draw border
-        painter.setPen(QColor("#D4AF37"))
+
+        pen = QPen(QColor("#2a2a2a"))
+        pen.setWidth(1)
+        painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(5, 5, 140, 110)
-        
-        # Draw frame number
-        painter.setPen(QColor("#FFD700"))
-        painter.setFont(painter.font())
+        painter.drawRect(6, 6, 120, 88)
+
+        # Inner decorative corners
+        cp = QPen(QColor("#D4AF37"))
+        cp.setWidth(1)
+        painter.setPen(cp)
+        clen = 10
+        # TL
+        painter.drawLine(6, 6, 6 + clen, 6)
+        painter.drawLine(6, 6, 6, 6 + clen)
+        # BR
+        painter.drawLine(126, 94, 126 - clen, 94)
+        painter.drawLine(126, 94, 126, 94 - clen)
+
+        painter.setPen(QColor("#333"))
+        font = QFont("Segoe UI", 8)
+        painter.setFont(font)
         painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, f"Frame {frame_id}")
-        
+
         painter.end()
         return pixmap
-    
+
     def _on_frame_clicked(self, frame_id: int):
-        """Handle frame selection."""
         self.selected_frame_id = frame_id
         metadata = self.frames.get(frame_id, {})
-        
-        # Update visual selection
+
         self._update_selection_visuals()
-        
-        # Emit signal
-        self.frame_selected.emit(frame_id, metadata, "")
-        
-        self.status_label.setText(f"Selected: {metadata.get('frame_name', 'Unknown')}")
-        print(f"[MOCK] Frame {frame_id} selected: {metadata.get('frame_name')}")
-    
+
+        image_path = metadata.get('image_path', '')
+        self.frame_selected.emit(frame_id, metadata, image_path)
+
+        self.status_label.setText(f"✦  {metadata.get('frame_name', 'Unknown')}")
+        print(f"[FRAME] Frame {frame_id} selected: {metadata.get('frame_name')}")
+
     def _update_selection_visuals(self):
-        """Update visual selection state of frame cards."""
         for i in range(self.grid_layout.count()):
             widget = self.grid_layout.itemAt(i).widget()
             if widget:
@@ -287,88 +322,81 @@ class FrameSelector(QWidget):
                 if frame_id == self.selected_frame_id:
                     widget.setStyleSheet("""
                         QFrame {
-                            background-color: #D4AF37;
-                            border: 3px solid #FFD700;
-                            border-radius: 10px;
+                            background-color: #1e1a0e;
+                            border: 1px solid #D4AF37;
+                            border-radius: 6px;
                         }
                     """)
-                    # Update text colors for contrast
-                    for child in widget.findChildren(QLabel):
-                        if "font-weight: bold" in child.styleSheet():
-                            child.setStyleSheet("color: #000000; font-weight: bold; font-size: 12px;")
                 else:
                     widget.setStyleSheet("""
                         QFrame {
-                            background-color: #2d2d2d;
-                            border: 2px solid #D4AF37;
-                            border-radius: 10px;
+                            background-color: #191919;
+                            border: 1px solid #2e2e2e;
+                            border-radius: 6px;
                         }
                         QFrame:hover {
-                            background-color: #3d3d3d;
-                            border: 3px solid #FFD700;
+                            background-color: #1d1d1d;
+                            border: 1px solid #444;
+                            border-radius: 6px;
                         }
                     """)
-                    # Reset text colors
-                    for child in widget.findChildren(QLabel):
-                        if "font-weight: bold" in child.styleSheet():
-                            child.setStyleSheet("color: #FFD700; font-weight: bold; font-size: 12px;")
-    
+
     def _show_context_menu(self, pos, frame_id: int):
-        """Show context menu for frame management."""
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu {
-                background-color: #2d2d2d;
-                color: #ffffff;
+                background-color: #1a1a1a;
+                color: #e0e0e0;
                 border: 1px solid #D4AF37;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+                font-size: 12px;
             }
             QMenu::item:selected {
                 background-color: #D4AF37;
                 color: #000000;
+                border-radius: 3px;
             }
         """)
-        
-        # Add Edit action
-        edit_action = menu.addAction("✏️ Edit Frame")
-        
-        # Add Delete action
-        delete_action = menu.addAction("🗑️ Delete Frame")
-        
+
+        edit_action = menu.addAction("✏  Edit Frame")
+        delete_action = menu.addAction("✕  Delete Frame")
+
         action = menu.exec(self.mapToGlobal(pos))
-        
+
         if action == edit_action:
             self._edit_frame(frame_id)
         elif action == delete_action:
             self._confirm_delete_frame(frame_id)
-    
+
     def _edit_frame(self, frame_id: int):
-        """Edit frame name."""
         if frame_id not in self.frames:
             return
-        
+
         metadata = self.frames[frame_id]
         current_name = metadata.get('frame_name', 'Unknown')
-        
+
         from PyQt6.QtWidgets import QInputDialog
         new_name, ok = QInputDialog.getText(
-            self, "Edit Frame", "Frame name:",
-            text=current_name
+            self, "Edit Frame", "Frame name:", text=current_name
         )
-        
+
         if ok and new_name:
             metadata['frame_name'] = new_name
             self.frames[frame_id] = metadata
             self.frame_edit_requested.emit(frame_id, new_name)
             self.rebuild_grid()
-            print(f"[MOCK] Frame {frame_id} renamed to '{new_name}'")
-    
+            print(f"[FRAME] Frame {frame_id} renamed to '{new_name}'")
+
     def _confirm_delete_frame(self, frame_id: int):
-        """Confirm and delete frame."""
         from PyQt6.QtWidgets import QMessageBox
-        
+
         metadata = self.frames.get(frame_id, {})
         frame_name = metadata.get('frame_name', 'Unknown')
-        
+
         reply = QMessageBox.question(
             self,
             "Delete Frame",
@@ -376,106 +404,91 @@ class FrameSelector(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
-        
+
         if reply == QMessageBox.StandardButton.Yes:
             self.delete_frame(frame_id)
-    
+
     def delete_frame(self, frame_id: int):
-        """Delete a frame from the grid."""
         if frame_id in self.frames:
             del self.frames[frame_id]
             self.frame_deleted.emit(frame_id)
             self.rebuild_grid()
-            print(f"[MOCK] Frame {frame_id} deleted")
-    
+            print(f"[FRAME] Frame {frame_id} deleted")
+
     def rebuild_grid(self):
-        """Rebuild the frame grid."""
-        # Clear existing widgets
         while self.grid_layout.count():
             item = self.grid_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        
-        # Re-add all frames
+
         frames_list = list(self.frames.items())
         for idx, (frame_id, metadata) in enumerate(frames_list):
             card = self._create_frame_card(frame_id, metadata)
             row = idx // 2
             col = idx % 2
             self.grid_layout.addWidget(card, row, col)
-        
+
         self.status_label.setText(f"{len(self.frames)} frames available")
-    
+
     def clear_frames(self):
-        """Clear all frames from the grid."""
         self.frames.clear()
         self.selected_frame_id = None
-        
+
         while self.grid_layout.count():
             item = self.grid_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        
+
         self.status_label.setText("No frames available")
-    
+
     def _on_add_frame(self):
-        """Handle add frame button."""
         if not self.event_id:
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "No Event", "Please select an event first.")
             return
-        
-        # Open file dialog to select frame image
+
         from PyQt6.QtWidgets import QFileDialog, QInputDialog
         file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Frame Image",
-            "",
-            "Images (*.png *.jpg *.jpeg *.bmp)"
+            self, "Select Frame Image", "", "Images (*.png *.jpg *.jpeg *.bmp)"
         )
-        
+
         if not file_path:
             return
-        
-        # Get frame name
+
         name, ok = QInputDialog.getText(self, "Frame Name", "Enter frame name:")
         if not ok or not name:
             return
-        
-        # Get slots
+
         slots_text, ok = QInputDialog.getText(self, "Number of Shots", "Enter number of shots:", text="2")
         if not ok:
             return
-        
+
         try:
             slots = int(slots_text)
         except ValueError:
             slots = 2
-        
-        # Get price
+
         price_text, ok = QInputDialog.getText(self, "Price", "Enter price (₱):", text="500")
         if not ok:
             return
-        
+
         try:
             price = float(price_text)
         except ValueError:
             price = 500.0
-        
-        # Copy frame to frames directory
+
         from pathlib import Path
         import shutil
-        
+
         frames_dir = Path("frames") / f"event_{self.event_id}"
         frames_dir.mkdir(parents=True, exist_ok=True)
-        
+
         dest_path = frames_dir / Path(file_path).name
         shutil.copy2(file_path, dest_path)
-        
-        # Add to database
+
         from core.session_manager import SessionManager
         session_manager = SessionManager()
-        
+
         try:
             frame_id = session_manager.add_frame(
                 self.event_id,
@@ -484,8 +497,7 @@ class FrameSelector(QWidget):
                 slots=slots,
                 price=price
             )
-            
-            # Reload frames
+
             self.load_frames_for_event(self.event_id)
             print(f"[FRAME] Added frame: {name} (ID: {frame_id})")
         finally:

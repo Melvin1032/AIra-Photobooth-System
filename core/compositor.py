@@ -38,21 +38,20 @@ class ImageCompositor:
         self.slots = []
         
         if self.frame_metadata and 'slots' in self.frame_metadata:
-            # Use metadata slots
+            # Check if slots is a list of position dicts or just a number
             slot_data = self.frame_metadata['slots']
-            for slot in slot_data:
-                self.slots.append((slot['x'], slot['y'], slot['width'], slot['height']))
+            if isinstance(slot_data, list) and len(slot_data) > 0 and isinstance(slot_data[0], dict):
+                # Use metadata slots with positions
+                for slot in slot_data:
+                    self.slots.append((slot['x'], slot['y'], slot['width'], slot['height']))
+            else:
+                # slots is just a number, use full frame area
+                frame_width, frame_height = self.frame_image.size
+                self.slots = [(0, 0, frame_width, frame_height)]
         else:
-            # Default slot positions (center, various layouts)
+            # Default: use full frame area
             frame_width, frame_height = self.frame_image.size
-            
-            # Default: single centered slot
-            slot_width = int(frame_width * 0.8)
-            slot_height = int(frame_height * 0.7)
-            x = (frame_width - slot_width) // 2
-            y = int(frame_height * 0.15)
-            
-            self.slots = [(x, y, slot_width, slot_height)]
+            self.slots = [(0, 0, frame_width, frame_height)]
     
     def composite_photos(self, photo_paths: List[str], output_path: str) -> bool:
         """Composite photos onto frame and save."""
@@ -61,30 +60,34 @@ class ImageCompositor:
                 logger.error("No frame loaded")
                 return False
             
-            # Start with a copy of the frame
-            result = self.frame_image.copy()
+            # Get frame dimensions
+            frame_width, frame_height = self.frame_image.size
             
-            # Composite each photo into its slot
-            for idx, photo_path in enumerate(photo_paths):
-                if idx >= len(self.slots):
-                    break
-                
-                if not Path(photo_path).exists():
-                    continue
-                
-                # Load and resize photo
-                photo = Image.open(photo_path).convert('RGBA')
-                slot = self.slots[idx]
-                
-                # Resize photo to fit slot while maintaining aspect ratio
-                photo_resized = self._resize_to_fit(photo, (slot[2], slot[3]))
-                
-                # Calculate position to center in slot
-                x = slot[0] + (slot[2] - photo_resized.width) // 2
-                y = slot[1] + (slot[3] - photo_resized.height) // 2
-                
-                # Paste photo onto result
-                result.paste(photo_resized, (x, y), photo_resized)
+            # Start with the first photo as base (resized to frame dimensions)
+            if not photo_paths:
+                logger.error("No photos provided")
+                return False
+            
+            photo_path = photo_paths[0]
+            if not Path(photo_path).exists():
+                logger.error(f"Photo not found: {photo_path}")
+                return False
+            
+            # Load photo and resize to match frame dimensions
+            photo = Image.open(photo_path).convert('RGBA')
+            photo_resized = photo.resize((frame_width, frame_height), Image.Resampling.LANCZOS)
+            
+            # Create result by starting with the photo
+            result = photo_resized
+            
+            # Overlay the frame on top of the photo
+            # The frame should have transparent areas where the photo should show through
+            if self.frame_image.mode == 'RGBA':
+                # Frame has alpha channel, use it for blending
+                result = Image.alpha_composite(result, self.frame_image)
+            else:
+                # Frame doesn't have alpha, paste it on top
+                result.paste(self.frame_image, (0, 0), self.frame_image if self.frame_image.mode == 'RGBA' else None)
             
             # Convert to RGB for saving (remove alpha)
             result_rgb = Image.new('RGB', result.size, (255, 255, 255))
