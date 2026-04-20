@@ -2,7 +2,7 @@
 Secondary display window for client viewing.
 """
 
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QLabel, QHBoxLayout
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QLinearGradient, QPen, QRadialGradient
 
@@ -19,6 +19,9 @@ class ViewerWindow(QMainWindow):
         self.frame_overlay_pixmap = None
         self.current_pixmap = None
         self.is_showing_final = False
+        self.qr_pixmap = None
+        self.show_qr_code = False
+        self.raw_mode = False  # Raw photo mode (no frame overlay)
 
         self._setup_ui()
         self._apply_styling()
@@ -29,14 +32,20 @@ class ViewerWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
 
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Left side - photo display
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
 
         self.display_label = QLabel()
         self.display_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.display_label.setMinimumSize(800, 600)
-        layout.addWidget(self.display_label)
+        left_layout.addWidget(self.display_label)
 
         self.status_label = QLabel()
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -47,7 +56,41 @@ class ViewerWindow(QMainWindow):
             background-color: transparent;
         """)
         self.status_label.hide()
-        layout.addWidget(self.status_label)
+        left_layout.addWidget(self.status_label)
+
+        main_layout.addWidget(left_widget, stretch=1)
+
+        # Right side - QR code (hidden by default)
+        self.qr_widget = QWidget()
+        self.qr_widget.setFixedWidth(220)
+        qr_layout = QVBoxLayout(self.qr_widget)
+        qr_layout.setContentsMargins(20, 20, 20, 20)
+        qr_layout.setSpacing(10)
+
+        self.qr_label = QLabel()
+        self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.qr_label.setStyleSheet("""
+            background-color: white;
+            border: 2px solid #D4AF37;
+            border-radius: 8px;
+            padding: 10px;
+        """)
+        self.qr_label.setFixedSize(180, 180)
+        qr_layout.addWidget(self.qr_label)
+
+        qr_text = QLabel("Scan to Download")
+        qr_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        qr_text.setStyleSheet("""
+            color: #D4AF37;
+            font-size: 12px;
+            font-weight: bold;
+            background: transparent;
+        """)
+        qr_layout.addWidget(qr_text)
+
+        qr_layout.addStretch()
+        self.qr_widget.hide()
+        main_layout.addWidget(self.qr_widget)
 
     def _apply_styling(self):
         self.setStyleSheet("""
@@ -198,7 +241,7 @@ class ViewerWindow(QMainWindow):
         self.update_live_preview()
         print(f"[VIEWER] Countdown {count}")
 
-    def show_final_photo(self, photo_path: str):
+    def show_final_photo(self, photo_path: str, show_qr: bool = False):
         self.is_showing_final = True
 
         pixmap = QPixmap(photo_path)
@@ -220,7 +263,31 @@ class ViewerWindow(QMainWindow):
 
         self.display_label.setPixmap(pixmap)
         self.status_label.hide()
+        
+        # Show QR code if enabled
+        if show_qr and self.qr_pixmap:
+            self.qr_label.setPixmap(self.qr_pixmap)
+            self.qr_widget.show()
+        else:
+            self.qr_widget.hide()
+            
         print("[VIEWER] Showing final photo")
+
+    def set_qr_code(self, qr_image):
+        """Set QR code image to display."""
+        if qr_image:
+            # Convert PIL Image to QPixmap
+            from PIL.ImageQt import ImageQt
+            qimage = ImageQt(qr_image)
+            self.qr_pixmap = QPixmap.fromImage(qimage)
+            self.qr_label.setPixmap(self.qr_pixmap.scaled(160, 160, Qt.AspectRatioMode.KeepAspectRatio))
+        else:
+            self.qr_pixmap = None
+
+    def toggle_raw_mode(self, enabled: bool):
+        """Toggle raw photo mode (no frame overlay)."""
+        self.raw_mode = enabled
+        print(f"[VIEWER] Raw mode: {'ON' if enabled else 'OFF'}")
 
     def clear_final_photo(self):
         self.is_showing_final = False

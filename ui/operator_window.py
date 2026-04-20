@@ -5,7 +5,7 @@ Main operator dashboard with complete UI.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QComboBox, QFrame, QSplitter,
-    QMessageBox, QInputDialog, QFileDialog
+    QMessageBox, QInputDialog, QFileDialog, QCheckBox, QSpinBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QColor, QPainter, QFont, QLinearGradient, QPen
@@ -19,6 +19,7 @@ from ui.viewer_window import ViewerWindow
 from core.camera import CameraManager
 from core.compositor import ImageCompositor
 from core.session_manager import SessionManager
+from core.qr_server import QRCodeServer
 
 
 # ── Shared Style Tokens ──────────────────────────────────────────────────────
@@ -207,6 +208,12 @@ class OperatorWindow(QMainWindow):
         self.is_countdown_active = False
         self.is_dark_mode = True
         self.preview_mode = "live"
+        
+        # Feature settings
+        self.auto_print_enabled = False
+        self.print_copies = 1
+        self.qr_download_enabled = True
+        self.raw_mode = False
 
         self.review_timer = QTimer()
         self.review_timer.setSingleShot(True)
@@ -218,6 +225,7 @@ class OperatorWindow(QMainWindow):
         self.camera_manager = CameraManager()
         self.compositor = ImageCompositor()
         self.session_manager = SessionManager()
+        self.qr_server = QRCodeServer()
 
         self.preview_timer = QTimer()
         self.preview_timer.timeout.connect(self._update_preview)
@@ -582,6 +590,108 @@ class OperatorWindow(QMainWindow):
         layout.addWidget(stats_card)
         layout.addSpacing(12)
 
+        # Feature toggles
+        features_label = QLabel("FEATURES")
+        features_label.setStyleSheet(LABEL_STYLE)
+        layout.addWidget(features_label)
+
+        # Auto-print toggle
+        auto_print_layout = QHBoxLayout()
+        auto_print_layout.setSpacing(8)
+        self.auto_print_check = QCheckBox("Auto-Print")
+        self.auto_print_check.setStyleSheet(f"""
+            QCheckBox {{
+                color: {TEXT_SEC};
+                font-size: 11px;
+                spacing: 6px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {BORDER_MID};
+                border-radius: 3px;
+                background: {BG_INPUT};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {GOLD};
+                border-color: {GOLD};
+            }}
+        """)
+        self.auto_print_check.stateChanged.connect(self._on_auto_print_toggle)
+        auto_print_layout.addWidget(self.auto_print_check)
+        
+        # Print copies spinner
+        self.copies_spin = QSpinBox()
+        self.copies_spin.setRange(1, 10)
+        self.copies_spin.setValue(1)
+        self.copies_spin.setFixedWidth(50)
+        self.copies_spin.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: {BG_INPUT};
+                color: {TEXT_PRI};
+                border: 1px solid {BORDER_MID};
+                border-radius: 3px;
+                padding: 2px;
+                font-size: 11px;
+            }}
+        """)
+        self.copies_spin.valueChanged.connect(self._on_copies_changed)
+        auto_print_layout.addWidget(self.copies_spin)
+        auto_print_layout.addWidget(QLabel("copies"))
+        auto_print_layout.addStretch()
+        layout.addLayout(auto_print_layout)
+
+        # QR Code toggle
+        self.qr_check = QCheckBox("QR Download")
+        self.qr_check.setChecked(True)
+        self.qr_check.setStyleSheet(f"""
+            QCheckBox {{
+                color: {TEXT_SEC};
+                font-size: 11px;
+                spacing: 6px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {BORDER_MID};
+                border-radius: 3px;
+                background: {BG_INPUT};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {GOLD};
+                border-color: {GOLD};
+            }}
+        """)
+        self.qr_check.stateChanged.connect(self._on_qr_toggle)
+        layout.addWidget(self.qr_check)
+
+        # Raw mode toggle
+        self.raw_mode_check = QCheckBox("Raw Photo Mode (No Frame)")
+        self.raw_mode_check.setStyleSheet(f"""
+            QCheckBox {{
+                color: {TEXT_SEC};
+                font-size: 11px;
+                spacing: 6px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {BORDER_MID};
+                border-radius: 3px;
+                background: {BG_INPUT};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {GOLD};
+                border-color: {GOLD};
+            }}
+        """)
+        self.raw_mode_check.stateChanged.connect(self._on_raw_mode_toggle)
+        layout.addWidget(self.raw_mode_check)
+
+        layout.addSpacing(12)
+        layout.addWidget(_divider())
+        layout.addSpacing(6)
+
         # Action buttons
         new_session_btn = _btn("✦  NEW SESSION", "ghost", 36)
         new_session_btn.clicked.connect(self._on_new_session)
@@ -832,21 +942,30 @@ class OperatorWindow(QMainWindow):
     def _on_photo_captured(self, photo_path: str):
         print(f"[CAMERA] Photo captured: {photo_path}")
 
-        processed_path = photo_path
-        if hasattr(self, 'current_frame_image_path') and self.current_frame_image_path:
-            if hasattr(self, 'current_frame_metadata') and self.current_frame_metadata:
-                self.compositor.load_frame(self.current_frame_image_path, self.current_frame_metadata)
-                from pathlib import Path
-                output_dir = Path("events") / "output"
-                output_dir.mkdir(parents=True, exist_ok=True)
-                import datetime
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                client_name = getattr(self, 'current_client_name', 'Guest')
-                processed_path = str(output_dir / f"{client_name}_{timestamp}.jpg")
-                if self.compositor.composite_photos([photo_path], processed_path):
-                    print(f"[COMPOSITE] Photo composited: {processed_path}")
-                else:
-                    processed_path = photo_path
+        # Determine which photo to use based on raw mode
+        if self.raw_mode:
+            # Raw mode: use photo without frame
+            processed_path = photo_path
+            display_path = photo_path
+            print("[CAPTURE] Raw mode - no frame overlay")
+        else:
+            # Normal mode: composite with frame
+            processed_path = photo_path
+            if hasattr(self, 'current_frame_image_path') and self.current_frame_image_path:
+                if hasattr(self, 'current_frame_metadata') and self.current_frame_metadata:
+                    self.compositor.load_frame(self.current_frame_image_path, self.current_frame_metadata)
+                    from pathlib import Path
+                    output_dir = Path("events") / "output"
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    import datetime
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    client_name = getattr(self, 'current_client_name', 'Guest')
+                    processed_path = str(output_dir / f"{client_name}_{timestamp}.jpg")
+                    if self.compositor.composite_photos([photo_path], processed_path):
+                        print(f"[COMPOSITE] Photo composited: {processed_path}")
+                    else:
+                        processed_path = photo_path
+            display_path = processed_path
 
         self.captured_photos.append(processed_path)
         self.current_slot_index += 1
@@ -860,14 +979,63 @@ class OperatorWindow(QMainWindow):
             )
             self.session_manager.update_session(self.current_session_id, shots_taken=self.current_slot_index)
 
-        self._show_photo_overlay(processed_path)
+        # Generate QR code if enabled
+        qr_image = None
+        if self.qr_download_enabled and self.qr_server.base_url:
+            qr_image = self.qr_server.generate_qr_code(processed_path)
+            if qr_image:
+                print(f"[QR] Generated QR code for: {processed_path}")
 
+        # Update viewer with photo and optional QR code
         if self.viewer_window:
-            self.viewer_window.show_final_photo(processed_path)
+            if qr_image:
+                self.viewer_window.set_qr_code(qr_image)
+            self.viewer_window.show_final_photo(display_path, show_qr=self.qr_download_enabled)
+
+        self._show_photo_overlay(display_path)
+
+        # Auto-print if enabled
+        if self.auto_print_enabled:
+            self._auto_print_photo(processed_path)
 
         self._load_sessions_for_event(self.current_event_id)
         self.shots_taken_label.setText(f"SHOTS  ·  {self.current_slot_index}")
         self.review_timer.start(3000)
+
+    def _auto_print_photo(self, photo_path: str):
+        """Automatically print photo with configured copies."""
+        try:
+            from PyQt6.QtPrintSupport import QPrinter, QPrintDialog, QPrinterInfo
+            from PyQt6.QtGui import QPixmap, QPainter
+            
+            # Get default printer
+            default_printer = QPrinterInfo.defaultPrinter()
+            if not default_printer:
+                print("[AUTO-PRINT] No printer found")
+                return
+            
+            printer = QPrinter(default_printer)
+            printer.setCopyCount(self.print_copies)
+            
+            # Print the photo
+            pixmap = QPixmap(photo_path)
+            if pixmap.isNull():
+                print("[AUTO-PRINT] Failed to load photo")
+                return
+            
+            painter = QPainter(printer)
+            rect = painter.viewport()
+            size = pixmap.size()
+            size.scale(rect.size(), Qt.AspectRatioMode.KeepAspectRatio)
+            painter.setViewport(rect.x(), rect.y(), size.width(), size.height())
+            painter.setWindow(pixmap.rect())
+            painter.drawPixmap(0, 0, pixmap)
+            painter.end()
+            
+            print(f"[AUTO-PRINT] Printed {self.print_copies} copy/copies of photo")
+            
+        except Exception as e:
+            print(f"[AUTO-PRINT] Error: {e}")
 
     def _show_photo_overlay(self, photo_path: str):
         self.preview_mode = "review"
@@ -1026,6 +1194,28 @@ class OperatorWindow(QMainWindow):
         self.shots_taken_label.setText("SHOTS  ·  0 / 0")
         self.amount_label.setText("AMOUNT  ·  ₱0")
         self.current_session_id = None
+
+    def _on_auto_print_toggle(self, state):
+        """Toggle auto-print on capture."""
+        self.auto_print_enabled = state == Qt.CheckState.Checked.value
+        print(f"[SETTINGS] Auto-print: {'ON' if self.auto_print_enabled else 'OFF'}")
+
+    def _on_copies_changed(self, value):
+        """Change number of print copies."""
+        self.print_copies = value
+        print(f"[SETTINGS] Print copies: {value}")
+
+    def _on_qr_toggle(self, state):
+        """Toggle QR code download."""
+        self.qr_download_enabled = state == Qt.CheckState.Checked.value
+        print(f"[SETTINGS] QR Download: {'ON' if self.qr_download_enabled else 'OFF'}")
+
+    def _on_raw_mode_toggle(self, state):
+        """Toggle raw photo mode (no frame overlay)."""
+        self.raw_mode = state == Qt.CheckState.Checked.value
+        if self.viewer_window:
+            self.viewer_window.toggle_raw_mode(self.raw_mode)
+        print(f"[SETTINGS] Raw Mode: {'ON' if self.raw_mode else 'OFF'}")
 
     def _on_usb_export(self):
         if not self.current_event_id:
