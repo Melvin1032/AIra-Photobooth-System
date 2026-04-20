@@ -456,6 +456,7 @@ class OperatorWindow(QMainWindow):
 
         self.countdown_overlay = CountdownOverlay(self.preview_label)
         self.countdown_overlay.countdown_finished.connect(self._on_countdown_finished)
+        self.countdown_overlay.countdown_tick.connect(self._on_countdown_tick)
 
         layout.addWidget(preview_frame, stretch=1)
 
@@ -664,6 +665,34 @@ class OperatorWindow(QMainWindow):
         """)
         self.qr_check.stateChanged.connect(self._on_qr_toggle)
         layout.addWidget(self.qr_check)
+
+        # Show/Hide QR button (for operator control)
+        self.show_qr_btn = QPushButton("Hide QR on Display")
+        self.show_qr_btn.setCheckable(True)
+        self.show_qr_btn.setChecked(False)  # Default: QR is visible
+        self.show_qr_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BG_INPUT};
+                color: {TEXT_SEC};
+                border: 1px solid {BORDER_MID};
+                border-radius: 3px;
+                padding: 8px 12px;
+                font-size: 10px;
+                font-weight: bold;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                border-color: {GOLD};
+                color: {TEXT_PRI};
+            }}
+            QPushButton:checked {{
+                background-color: {GOLD};
+                color: #0a0a0a;
+                border-color: {GOLD};
+            }}
+        """)
+        self.show_qr_btn.clicked.connect(self._on_show_qr_toggle)
+        layout.addWidget(self.show_qr_btn)
 
         # Raw mode toggle
         self.raw_mode_check = QCheckBox("Raw Photo Mode (No Frame)")
@@ -951,9 +980,20 @@ class OperatorWindow(QMainWindow):
         else:
             # Normal mode: composite with frame
             processed_path = photo_path
-            if hasattr(self, 'current_frame_image_path') and self.current_frame_image_path:
-                if hasattr(self, 'current_frame_metadata') and self.current_frame_metadata:
-                    self.compositor.load_frame(self.current_frame_image_path, self.current_frame_metadata)
+            display_path = photo_path
+            
+            # Check if frame is selected
+            has_frame = hasattr(self, 'current_frame_image_path') and self.current_frame_image_path
+            has_metadata = hasattr(self, 'current_frame_metadata') and self.current_frame_metadata
+            
+            print(f"[CAPTURE] Frame check - has_frame: {has_frame}, has_metadata: {has_metadata}")
+            
+            if has_frame and has_metadata:
+                print(f"[CAPTURE] Loading frame: {self.current_frame_image_path}")
+                frame_loaded = self.compositor.load_frame(self.current_frame_image_path, self.current_frame_metadata)
+                print(f"[CAPTURE] Frame loaded: {frame_loaded}")
+                
+                if frame_loaded:
                     from pathlib import Path
                     output_dir = Path("events") / "output"
                     output_dir.mkdir(parents=True, exist_ok=True)
@@ -961,11 +1001,21 @@ class OperatorWindow(QMainWindow):
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     client_name = getattr(self, 'current_client_name', 'Guest')
                     processed_path = str(output_dir / f"{client_name}_{timestamp}.jpg")
-                    if self.compositor.composite_photos([photo_path], processed_path):
-                        print(f"[COMPOSITE] Photo composited: {processed_path}")
+                    
+                    print(f"[CAPTURE] Compositing photo to: {processed_path}")
+                    composite_result = self.compositor.composite_photos([photo_path], processed_path)
+                    
+                    if composite_result:
+                        print(f"[COMPOSITE] Photo composited successfully: {processed_path}")
+                        display_path = processed_path
                     else:
+                        print(f"[COMPOSITE] ERROR: Compositing failed! Using raw photo.")
                         processed_path = photo_path
-            display_path = processed_path
+                else:
+                    print(f"[CAPTURE] ERROR: Failed to load frame! Using raw photo.")
+                    processed_path = photo_path
+            else:
+                print(f"[CAPTURE] No frame selected - using raw photo")
 
         self.captured_photos.append(processed_path)
         self.current_slot_index += 1
@@ -982,15 +1032,29 @@ class OperatorWindow(QMainWindow):
         # Generate QR code if enabled
         qr_image = None
         if self.qr_download_enabled and self.qr_server.base_url:
-            qr_image = self.qr_server.generate_qr_code(processed_path)
+            # ALWAYS use the raw photo for QR code since compositing may fail
+            # The QR server will copy it to events/output/ for serving
+            from pathlib import Path
+            qr_photo_path = photo_path  # Use raw photo path
+            
+            # If compositing succeeded and file exists, use processed path
+            if Path(processed_path).exists() and processed_path != photo_path:
+                qr_photo_path = processed_path
+                print(f"[QR] Using composited photo for QR code: {qr_photo_path}")
+            else:
+                print(f"[QR] Using raw photo for QR code: {qr_photo_path}")
+            
+            qr_image = self.qr_server.generate_qr_code(qr_photo_path)
             if qr_image:
-                print(f"[QR] Generated QR code for: {processed_path}")
+                print(f"[QR] Generated QR code for: {qr_photo_path}")
 
         # Update viewer with photo and optional QR code
         if self.viewer_window:
             if qr_image:
                 self.viewer_window.set_qr_code(qr_image)
-            self.viewer_window.show_final_photo(display_path, show_qr=self.qr_download_enabled)
+            # Only show QR if download is enabled AND operator hasn't hidden it
+            qr_visible = self.qr_download_enabled and not self.show_qr_btn.isChecked()
+            self.viewer_window.show_final_photo(display_path, show_qr=qr_visible)
 
         self._show_photo_overlay(display_path)
 
@@ -1102,6 +1166,31 @@ class OperatorWindow(QMainWindow):
         if self.viewer_window:
             self.viewer_window.show_countdown(3)
 
+    def _on_countdown_tick(self, count: int):
+        """Handle countdown tick - update viewer and play beep."""
+        if self.viewer_window:
+            self.viewer_window.show_countdown(count)
+        # Play beep sound
+        self._play_beep()
+        print(f"[COUNTDOWN] Tick: {count}")
+
+    def _play_beep(self):
+        """Play a beep sound for countdown."""
+        try:
+            # Try using winsound on Windows
+            import winsound
+            winsound.Beep(1000, 200)  # 1000 Hz for 200ms
+        except Exception:
+            # Fallback: try using QSoundEffect
+            try:
+                from PyQt6.QtMultimedia import QSoundEffect
+                from PyQt6.QtCore import QUrl
+                # Create a simple beep using QSoundEffect if available
+                # Note: This requires a sound file, so we'll skip if not available
+                pass
+            except Exception:
+                pass
+
     def _on_countdown_finished(self):
         self._trigger_capture()
 
@@ -1209,6 +1298,20 @@ class OperatorWindow(QMainWindow):
         """Toggle QR code download."""
         self.qr_download_enabled = state == Qt.CheckState.Checked.value
         print(f"[SETTINGS] QR Download: {'ON' if self.qr_download_enabled else 'OFF'}")
+
+    def _on_show_qr_toggle(self):
+        """Toggle QR code visibility on client display."""
+        is_hidden = self.show_qr_btn.isChecked()
+        if is_hidden:
+            self.show_qr_btn.setText("Show QR on Display")
+            print("[OPERATOR] QR code hidden on client display")
+        else:
+            self.show_qr_btn.setText("Hide QR on Display")
+            print("[OPERATOR] QR code shown on client display")
+        
+        # Update viewer window
+        if self.viewer_window:
+            self.viewer_window.set_qr_visible(not is_hidden)
 
     def _on_raw_mode_toggle(self, state):
         """Toggle raw photo mode (no frame overlay)."""

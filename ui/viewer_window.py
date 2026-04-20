@@ -20,8 +20,10 @@ class ViewerWindow(QMainWindow):
         self.current_pixmap = None
         self.is_showing_final = False
         self.qr_pixmap = None
+        self.qr_visible = True  # QR visibility controlled by operator
         self.show_qr_code = False
         self.raw_mode = False  # Raw photo mode (no frame overlay)
+        self.current_photo_path = None
 
         self._setup_ui()
         self._apply_styling()
@@ -58,37 +60,113 @@ class ViewerWindow(QMainWindow):
         self.status_label.hide()
         left_layout.addWidget(self.status_label)
 
+        # Countdown overlay (separate from status_label)
+        self.countdown_overlay_label = QLabel(self.display_label)
+        self.countdown_overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.countdown_overlay_label.setStyleSheet("""
+            color: #FFD700;
+            font-size: 120px;
+            font-weight: bold;
+            background-color: rgba(0, 0, 0, 160);
+            border-radius: 30px;
+        """)
+        self.countdown_overlay_label.hide()
+
         main_layout.addWidget(left_widget, stretch=1)
 
-        # Right side - QR code (hidden by default)
+        # Right side - QR code panel (hidden by default)
         self.qr_widget = QWidget()
-        self.qr_widget.setFixedWidth(220)
+        self.qr_widget.setFixedWidth(280)
+        self.qr_widget.setStyleSheet("background-color: #0a0a0a;")
+        
         qr_layout = QVBoxLayout(self.qr_widget)
-        qr_layout.setContentsMargins(20, 20, 20, 20)
-        qr_layout.setSpacing(10)
+        qr_layout.setContentsMargins(15, 30, 15, 30)
+        qr_layout.setSpacing(20)
+        qr_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        # Top spacer for vertical centering
+        qr_layout.addStretch(1)
+
+        # Photo preview label
+        photo_preview_title = QLabel("Your Photo")
+        photo_preview_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        photo_preview_title.setStyleSheet("""
+            color: #D4AF37;
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            background: transparent;
+            margin-bottom: 5px;
+        """)
+        qr_layout.addWidget(photo_preview_title, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Photo preview (small thumbnail) - centered
+        self.qr_photo_preview = QLabel()
+        self.qr_photo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.qr_photo_preview.setStyleSheet("""
+            background-color: #0d0d0d;
+            border: 1px solid #3d3d3d;
+            border-radius: 6px;
+            padding: 3px;
+        """)
+        self.qr_photo_preview.setFixedSize(180, 135)
+        self.qr_photo_preview.setScaledContents(True)
+        qr_layout.addWidget(self.qr_photo_preview, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Spacer between photo and QR
+        qr_layout.addSpacing(25)
+
+        # Separator line
+        separator = QLabel()
+        separator.setFixedSize(180, 1)
+        separator.setStyleSheet("background-color: #2a2a2a;")
+        qr_layout.addWidget(separator, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Spacer after separator
+        qr_layout.addSpacing(20)
+
+        # QR Code label
+        qr_title = QLabel("Scan to Download")
+        qr_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        qr_title.setStyleSheet("""
+            color: #D4AF37;
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            background: transparent;
+            margin-bottom: 5px;
+        """)
+        qr_layout.addWidget(qr_title, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # QR Code image - centered with white background
         self.qr_label = QLabel()
         self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.qr_label.setStyleSheet("""
             background-color: white;
-            border: 2px solid #D4AF37;
+            border: 3px solid #D4AF37;
             border-radius: 8px;
             padding: 10px;
         """)
-        self.qr_label.setFixedSize(180, 180)
-        qr_layout.addWidget(self.qr_label)
+        self.qr_label.setFixedSize(260, 260)
+        qr_layout.addWidget(self.qr_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        qr_text = QLabel("Scan to Download")
-        qr_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        qr_text.setStyleSheet("""
-            color: #D4AF37;
-            font-size: 12px;
-            font-weight: bold;
+        # Spacer before footer
+        qr_layout.addSpacing(15)
+
+        # Footer text
+        footer_text = QLabel("AIra Photobooth")
+        footer_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        footer_text.setStyleSheet("""
+            color: #555;
+            font-size: 9px;
+            letter-spacing: 1px;
             background: transparent;
         """)
-        qr_layout.addWidget(qr_text)
+        qr_layout.addWidget(footer_text, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        qr_layout.addStretch()
+        # Bottom spacer for vertical centering
+        qr_layout.addStretch(1)
+
         self.qr_widget.hide()
         main_layout.addWidget(self.qr_widget)
 
@@ -236,13 +314,33 @@ class ViewerWindow(QMainWindow):
             self.frame_overlay_pixmap = None
 
     def show_countdown(self, count: int):
-        self.status_label.setText(str(count))
-        self.status_label.show()
-        self.update_live_preview()
+        """Show countdown number on viewer display as overlay."""
+        self.is_showing_final = False
+        
+        # Position the countdown overlay in center of display
+        display_rect = self.display_label.geometry()
+        overlay_size = 200
+        x = (display_rect.width() - overlay_size) // 2
+        y = (display_rect.height() - overlay_size) // 2
+        self.countdown_overlay_label.setGeometry(x, y, overlay_size, overlay_size)
+        
+        # Set the countdown number
+        self.countdown_overlay_label.setText(str(count))
+        self.countdown_overlay_label.show()
+        self.countdown_overlay_label.raise_()
+        
+        # Hide after 900ms
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(900, self._hide_countdown_overlay)
         print(f"[VIEWER] Countdown {count}")
+    
+    def _hide_countdown_overlay(self):
+        """Hide the countdown overlay."""
+        self.countdown_overlay_label.hide()
 
     def show_final_photo(self, photo_path: str, show_qr: bool = False):
         self.is_showing_final = True
+        self.current_photo_path = photo_path
 
         pixmap = QPixmap(photo_path)
         if pixmap.isNull():
@@ -264,14 +362,33 @@ class ViewerWindow(QMainWindow):
         self.display_label.setPixmap(pixmap)
         self.status_label.hide()
         
+        # Update QR photo preview
+        if not pixmap.isNull():
+            preview_pixmap = pixmap.scaled(
+                200, 150,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            self.qr_photo_preview.setPixmap(preview_pixmap)
+        
         # Show QR code if enabled
-        if show_qr and self.qr_pixmap:
+        self._update_qr_visibility()
+            
+        print("[VIEWER] Showing final photo")
+    
+    def _update_qr_visibility(self):
+        """Update QR code visibility based on settings."""
+        if self.qr_visible and self.qr_pixmap and self.is_showing_final:
             self.qr_label.setPixmap(self.qr_pixmap)
             self.qr_widget.show()
         else:
             self.qr_widget.hide()
-            
-        print("[VIEWER] Showing final photo")
+    
+    def set_qr_visible(self, visible: bool):
+        """Set QR code visibility (controlled by operator)."""
+        self.qr_visible = visible
+        self._update_qr_visibility()
+        print(f"[VIEWER] QR visibility: {'ON' if visible else 'OFF'}")
 
     def set_qr_code(self, qr_image):
         """Set QR code image to display."""
@@ -280,7 +397,8 @@ class ViewerWindow(QMainWindow):
             from PIL.ImageQt import ImageQt
             qimage = ImageQt(qr_image)
             self.qr_pixmap = QPixmap.fromImage(qimage)
-            self.qr_label.setPixmap(self.qr_pixmap.scaled(160, 160, Qt.AspectRatioMode.KeepAspectRatio))
+            # Display QR at 230px to fit in 260px label with 10px padding + 3px border (total 46px margin)
+            self.qr_label.setPixmap(self.qr_pixmap.scaled(230, 230, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation))
         else:
             self.qr_pixmap = None
 
