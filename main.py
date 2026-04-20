@@ -4,6 +4,7 @@ Photobooth application with complete testable UI.
 
 import sys
 import logging
+import traceback
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
@@ -12,6 +13,28 @@ from PyQt6.QtGui import QFont
 
 from config import config
 from ui.operator_window import OperatorWindow
+
+
+def setup_exception_handling():
+    """Setup global exception handler to prevent crashes."""
+    def exception_hook(exctype, value, tb):
+        """Catch unhandled exceptions and log them."""
+        error_msg = ''.join(traceback.format_exception(exctype, value, tb))
+        logger = logging.getLogger(__name__)
+        logger.error(f"Unhandled exception: {error_msg}")
+        print(f"\n❌ UNHANDLED EXCEPTION:\n{error_msg}")
+        
+        # Don't crash - log and continue
+        sys.__excepthook__(exctype, value, tb)
+    
+    sys.excepthook = exception_hook
+    
+    # Also handle Qt exceptions
+    from PyQt6.QtCore import pyqtRemoveInputHook
+    try:
+        pyqtRemoveInputHook()
+    except:
+        pass
 
 
 def setup_logging():
@@ -66,6 +89,9 @@ def main():
     logger = logging.getLogger(__name__)
     logger.info(f"Starting {config.app_name} v{config.version}")
     
+    # Setup global exception handling
+    setup_exception_handling()
+    
     # Setup application
     app = setup_application()
     
@@ -81,8 +107,14 @@ def main():
     print("📸 Capture flow: Select frame → Click CAPTURE")
     print()
     
-    # Run application
-    sys.exit(app.exec())
+    # Run application with exception handling
+    try:
+        exit_code = app.exec()
+        sys.exit(exit_code)
+    except Exception as e:
+        logger.error(f"Application exec error: {e}")
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

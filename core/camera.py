@@ -36,64 +36,80 @@ class CameraThread(QThread):
     
     def run(self):
         """Main camera loop."""
-        cap = cv2.VideoCapture(self.camera_id, cv2.CAP_DSHOW)  # Use DirectShow backend
-        
-        if not cap.isOpened():
-            self.error_occurred.emit(f"Failed to open camera {self.camera_id}")
-            return
-        
-        # Get camera's native resolution first
-        native_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        native_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
-        # Only set resolution if camera supports higher resolution
-        # Try 1920x1080 for HD cameras, fallback to native if not supported
-        if native_width >= 1920 and native_height >= 1080:
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-        elif native_width >= 1280 and native_height >= 720:
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        # Otherwise use native resolution (don't force it)
-        
-        # Get actual camera resolution after setting
-        self.actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
-        # Set camera properties for smooth capture - use default auto settings
-        cap.set(cv2.CAP_PROP_FPS, self.fps)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer for lower latency
-        
-        # Let camera use default auto-exposure and auto-gain
-        # Don't override brightness/contrast to use camera defaults
-        
-        self.running = True
-        logger.info(f"Camera {self.camera_id} started at {self.actual_width}x{self.actual_height}")
-        
-        while self.running:
-            ret, frame = cap.read()
+        cap = None
+        try:
+            cap = cv2.VideoCapture(self.camera_id, cv2.CAP_DSHOW)  # Use DirectShow backend
             
-            if not ret:
-                continue
+            if not cap.isOpened():
+                self.error_occurred.emit(f"Failed to open camera {self.camera_id}")
+                return
             
-            self.frame_count += 1
+            # Get camera's native resolution first
+            native_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            native_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             
-            # Handle capture request
-            if self.capture_requested:
-                self._save_frame(frame)
-                self.capture_requested = False
+            # Only set resolution if camera supports higher resolution
+            # Try 1920x1080 for HD cameras, fallback to native if not supported
+            if native_width >= 1920 and native_height >= 1080:
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            elif native_width >= 1280 and native_height >= 720:
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            # Otherwise use native resolution (don't force it)
             
-            # Skip frames for preview (performance) - only if needed
-            if self.frame_skip > 1 and self.frame_count % self.frame_skip != 0:
-                continue
+            # Get actual camera resolution after setting
+            self.actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            self.actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             
-            # Encode and emit preview frame
-            jpeg_bytes = self._encode_frame(frame)
-            if jpeg_bytes:
-                self.frame_ready.emit(jpeg_bytes)
-        
-        cap.release()
-        logger.info(f"Camera {self.camera_id} stopped")
+            # Set camera properties for smooth capture - use default auto settings
+            cap.set(cv2.CAP_PROP_FPS, self.fps)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer for lower latency
+            
+            # Let camera use default auto-exposure and auto-gain
+            # Don't override brightness/contrast to use camera defaults
+            
+            self.running = True
+            logger.info(f"Camera {self.camera_id} started at {self.actual_width}x{self.actual_height}")
+            
+            while self.running:
+                try:
+                    ret, frame = cap.read()
+                    
+                    if not ret:
+                        # Frame read failed, wait a bit and retry
+                        import time
+                        time.sleep(0.01)
+                        continue
+                    
+                    self.frame_count += 1
+                    
+                    # Handle capture request
+                    if self.capture_requested:
+                        self._save_frame(frame)
+                        self.capture_requested = False
+                    
+                    # Skip frames for preview (performance) - only if needed
+                    if self.frame_skip > 1 and self.frame_count % self.frame_skip != 0:
+                        continue
+                    
+                    # Encode and emit preview frame
+                    jpeg_bytes = self._encode_frame(frame)
+                    if jpeg_bytes:
+                        self.frame_ready.emit(jpeg_bytes)
+                        
+                except Exception as e:
+                    logger.error(f"Camera loop error: {e}")
+                    # Continue loop instead of crashing
+                    continue
+            
+        except Exception as e:
+            logger.error(f"Camera thread error: {e}")
+            self.error_occurred.emit(f"Camera error: {e}")
+        finally:
+            if cap:
+                cap.release()
+            logger.info(f"Camera {self.camera_id} stopped")
     
     def _encode_frame(self, frame: np.ndarray) -> Optional[bytes]:
         """Encode frame to JPEG bytes - optimized for smooth preview."""
@@ -136,7 +152,9 @@ class CameraThread(QThread):
     def stop(self):
         """Stop the camera thread."""
         self.running = False
-        self.wait(1000)
+        # Give thread time to clean up
+        if self.isRunning():
+            self.wait(2000)  # Wait up to 2 seconds
 
 
 class CameraManager:

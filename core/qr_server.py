@@ -438,6 +438,13 @@ class QRCodeServer:
     
     def stop(self):
         """Stop the HTTP server."""
-        if self.server:
-            self.server.shutdown()
-            logger.info("QR Server stopped")
+        try:
+            if self.server:
+                print("[QR SERVER] Shutting down server...")
+                self.server.shutdown()
+                self.server = None
+                logger.info("QR Server stopped")
+                print("[QR SERVER] Server stopped")
+        except Exception as e:
+            logger.error(f"Error stopping QR server: {e}")
+            print(f"[QR SERVER] Error during shutdown: {e}")

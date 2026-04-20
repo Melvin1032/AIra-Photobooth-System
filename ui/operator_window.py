@@ -230,6 +230,12 @@ class OperatorWindow(QMainWindow):
         self.preview_timer = QTimer()
         self.preview_timer.timeout.connect(self._update_preview)
         self.preview_timer.setInterval(33)
+        
+        # Watchdog timer to detect freezes (optional, disabled by default)
+        self.watchdog_timer = QTimer()
+        self.watchdog_timer.setInterval(10000)  # Check every 10 seconds
+        self.watchdog_timer.timeout.connect(self._watchdog_check)
+        self.last_heartbeat = 0
 
         self.available_cameras = []
         self.current_camera_index = 0
@@ -936,7 +942,14 @@ class OperatorWindow(QMainWindow):
         self.current_frame_bytes = jpeg_bytes
 
     def _update_preview(self):
-        if hasattr(self, 'current_frame_bytes') and self.current_frame_bytes:
+        try:
+            # Update heartbeat for watchdog
+            import time
+            self.last_heartbeat = time.time()
+            
+            if not hasattr(self, 'current_frame_bytes') or not self.current_frame_bytes:
+                return
+            
             pixmap = QPixmap()
             pixmap.loadFromData(self.current_frame_bytes)
             if not pixmap.isNull():
@@ -963,8 +976,14 @@ class OperatorWindow(QMainWindow):
                     scaled = final_pixmap
                 self.preview_label.setPixmap(scaled)
                 self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                
+                # Update viewer window if not showing final photo
                 if self.viewer_window and not self.viewer_window.is_showing_final:
                     self.viewer_window.update_live_preview(self.current_frame_bytes)
+                
+        except Exception as e:
+            # Don't let preview errors crash the app
+            print(f"[PREVIEW] Error updating preview: {e}")
 
     # ── Photo Capture ─────────────────────────────────────────────────────────
 
@@ -1506,14 +1525,46 @@ class OperatorWindow(QMainWindow):
 
     def _show_settings(self):
         QMessageBox.information(self, "Settings", "Settings will be implemented here.")
+    
+    def _watchdog_check(self):
+        """Watchdog to detect application freezes."""
+        import time
+        current_time = time.time()
+        if self.last_heartbeat > 0 and (current_time - self.last_heartbeat) > 30:
+            print("[WATCHDOG] Application may be frozen! Last heartbeat was 30+ seconds ago")
+            # Could implement auto-recovery here if needed
+        self.last_heartbeat = current_time
 
     def closeEvent(self, event):
-        if self.camera_manager:
-            self.camera_manager.stop_camera()
-        if self.preview_timer:
-            self.preview_timer.stop()
-        if self.session_manager:
-            self.session_manager.close()
-        if self.viewer_window:
-            self.viewer_window.close()
-        event.accept()
+        """Clean shutdown of all resources."""
+        try:
+            print("[SHUTDOWN] Closing application...")
+            
+            # Stop preview timer first
+            if hasattr(self, 'preview_timer') and self.preview_timer:
+                self.preview_timer.stop()
+            
+            # Stop review timer
+            if hasattr(self, 'review_timer') and self.review_timer:
+                self.review_timer.stop()
+            
+            # Stop camera
+            if hasattr(self, 'camera_manager') and self.camera_manager:
+                self.camera_manager.stop_camera()
+            
+            # Close viewer window
+            if hasattr(self, 'viewer_window') and self.viewer_window:
+                self.viewer_window.close()
+            
+            # Close database
+            if hasattr(self, 'session_manager') and self.session_manager:
+                self.session_manager.close()
+            
+            # QR server will auto-cleanup as daemon thread
+            
+            print("[SHUTDOWN] Cleanup complete")
+            event.accept()
+            
+        except Exception as e:
+            print(f"[SHUTDOWN] Error during cleanup: {e}")
+            event.accept()  # Accept anyway to allow closing

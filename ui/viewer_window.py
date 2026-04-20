@@ -5,6 +5,7 @@ Secondary display window for client viewing.
 from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QLabel, QHBoxLayout
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QLinearGradient, QPen, QRadialGradient
+import gc  # Garbage collection
 
 
 class ViewerWindow(QMainWindow):
