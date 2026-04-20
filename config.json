@@ -9,8 +9,33 @@
   },
   "camera": {
     "fps": 15,
-    "quality": 75,
+    "quality": 90,
     "frame_skip": 2
+  },
+  "mirror_mode": true,
+  "countdown_duration": 5,
+  "preview_duration": 10,
+  "idle_message": "Tap the button to start!",
+  "print": {
+    "auto_print": false,
+    "copies": 1,
+    "quality": "Normal",
+    "paper_size": "4x6 inches"
+  },
+  "qr_code": {
+    "enabled": true,
+    "visible_by_default": true
+  },
+  "download_title": "Your Photo is Ready!",
+  "download_message": "Scan the QR code or tap the button below to download",
+  "storage": {
+    "auto_export_usb": false,
+    "auto_cleanup": false,
+    "cleanup_days": 30
+  },
+  "network": {
+    "port": 8080,
+    "cloudflare_auto_start": true
   },
   "performance": {
     "lazy_loading": true,

@@ -1654,7 +1654,40 @@ class OperatorWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to save:\n{str(e)}")
 
     def _show_settings(self):
-        QMessageBox.information(self, "Settings", "Settings will be implemented here.")
+        """Open settings window."""
+        from ui.settings_window import SettingsWindow
+        
+        settings_dialog = SettingsWindow("config.json")
+        settings_dialog.settings_changed.connect(self._on_settings_changed)
+        
+        # Execute as modal dialog
+        result = settings_dialog.exec()
+        
+        if result == SettingsWindow.DialogCode.Accepted:
+            print("[SETTINGS] Settings saved successfully")
+            # Reload settings if needed
+            self._reload_settings()
+    
+    def _on_settings_changed(self, settings: dict):
+        """Handle settings change event."""
+        print("[SETTINGS] Settings changed, applying updates...")
+        # Apply settings that need immediate effect
+        # For example: update QR server, camera settings, etc.
+    
+    def _reload_settings(self):
+        """Reload settings from config.json."""
+        try:
+            import json
+            with open("config.json", 'r') as f:
+                settings = json.load(f)
+            
+            # Apply settings that need immediate updates
+            if 'qr_code' in settings:
+                self.qr_download_enabled = settings['qr_code'].get('enabled', True)
+            
+            print("[SETTINGS] Settings reloaded successfully")
+        except Exception as e:
+            print(f"[SETTINGS] Error reloading settings: {e}")
     
     def _watchdog_check(self):
         """Watchdog to detect application freezes."""
