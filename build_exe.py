@@ -44,19 +44,19 @@ def build_exe():
     
     # PyInstaller command
     build_command = (
-        "pyinstaller "
-        "--name AIraPhotobooth "
-        "--windowed "
-        "--onefile "
-        "--icon=NONE "
-        "--add-data 'config.json;.' "
-        "--add-data 'frames;frames' "
-        "--hidden-import cv2 "
-        "--hidden-import numpy "
-        "--hidden-import PIL "
-        "--hidden-import qrcode "
-        "--collect-all PyQt6 "
-        "main.py"
+        'pyinstaller '
+        '--name AIraPhotobooth '
+        '--windowed '
+        '--onefile '
+        '--add-data "config.json;." '
+        '--add-data "frames;frames" '
+        '--add-data "assets;assets" '
+        '--hidden-import cv2 '
+        '--hidden-import numpy '
+        '--hidden-import PIL '
+        '--hidden-import qrcode '
+        '--collect-all PyQt6 '
+        'main.py'
     )
     
     print(f"Running: {build_command}")

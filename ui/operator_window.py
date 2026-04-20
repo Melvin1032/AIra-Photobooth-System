@@ -199,6 +199,13 @@ class OperatorWindow(QMainWindow):
         self.setWindowTitle(f"{config.app_name} v{config.version} — Operator")
         self.setMinimumSize(1400, 900)
         self.resize(1600, 1000)
+        
+        # Set application icon
+        from pathlib import Path
+        logo_path = Path("assets/LOGO.png")
+        if logo_path.exists():
+            from PyQt6.QtGui import QIcon
+            self.setWindowIcon(QIcon(str(logo_path)))
 
         # State
         self.current_event_id = None
@@ -299,10 +306,22 @@ class OperatorWindow(QMainWindow):
         layout.setContentsMargins(20, 0, 16, 0)
         layout.setSpacing(0)
 
-        # Logo mark
-        logo_mark = QLabel("✦")
-        logo_mark.setStyleSheet(f"color: {GOLD}; font-size: 14px; background: transparent;")
-        layout.addWidget(logo_mark)
+        # Logo image
+        logo_path = Path("assets/LOGO.png")
+        if logo_path.exists():
+            logo_label = QLabel()
+            logo_pixmap = QPixmap(str(logo_path))
+            # Scale logo to 36x36 for top bar
+            logo_scaled = logo_pixmap.scaled(36, 36, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            logo_label.setPixmap(logo_scaled)
+            logo_label.setStyleSheet("background: transparent;")
+            layout.addWidget(logo_label)
+        else:
+            # Fallback to text logo
+            logo_mark = QLabel("✦")
+            logo_mark.setStyleSheet(f"color: {GOLD}; font-size: 14px; background: transparent;")
+            layout.addWidget(logo_mark)
+        
         layout.addSpacing(10)
 
         # App name

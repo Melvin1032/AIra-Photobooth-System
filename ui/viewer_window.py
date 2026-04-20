@@ -16,6 +16,13 @@ class ViewerWindow(QMainWindow):
 
         self.setWindowTitle("AIra Pro — Client Display")
         self.setMinimumSize(800, 600)
+        
+        # Set application icon
+        from pathlib import Path
+        logo_path = Path("assets/LOGO.png")
+        if logo_path.exists():
+            from PyQt6.QtGui import QIcon
+            self.setWindowIcon(QIcon(str(logo_path)))
 
         self.frame_overlay_pixmap = None
         self.current_pixmap = None
