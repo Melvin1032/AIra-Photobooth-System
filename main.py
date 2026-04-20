@@ -19,13 +19,18 @@ def setup_exception_handling():
     """Setup global exception handler to prevent crashes."""
     def exception_hook(exctype, value, tb):
         """Catch unhandled exceptions and log them."""
-        error_msg = ''.join(traceback.format_exception(exctype, value, tb))
-        logger = logging.getLogger(__name__)
-        logger.error(f"Unhandled exception: {error_msg}")
-        print(f"\n❌ UNHANDLED EXCEPTION:\n{error_msg}")
-        
-        # Don't crash - log and continue
-        sys.__excepthook__(exctype, value, tb)
+        try:
+            error_msg = ''.join(traceback.format_exception(exctype, value, tb))
+            logger = logging.getLogger(__name__)
+            logger.error(f"Unhandled exception: {error_msg}")
+            print(f"\n❌ UNHANDLED EXCEPTION:\n{error_msg}")
+            
+            # Don't crash - log and continue if possible
+            # Only call original hook for fatal errors
+            if exctype in (KeyboardInterrupt, SystemExit):
+                sys.__excepthook__(exctype, value, tb)
+        except:
+            pass  # Prevent exception in exception handler
     
     sys.excepthook = exception_hook
     

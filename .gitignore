@@ -52,3 +52,8 @@ Thumbs.db
 
 # PyInstaller
 *.spec
+
+# Build artifacts (large files)
+installer_output/
+cloudflared.exe
+assets/innosetup-*.exe

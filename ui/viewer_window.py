@@ -28,6 +28,7 @@ class ViewerWindow(QMainWindow):
         self.current_pixmap = None
         self.is_showing_final = False
         self.qr_pixmap = None
+        self._qr_image_qt = None  # Keep Qt image reference to prevent GC corruption
         self.qr_visible = True  # QR visibility controlled by operator
         self.show_qr_code = False
         self.raw_mode = False  # Raw photo mode (no frame overlay)
@@ -347,68 +348,102 @@ class ViewerWindow(QMainWindow):
         self.countdown_overlay_label.hide()
 
     def show_final_photo(self, photo_path: str, show_qr: bool = False):
-        self.is_showing_final = True
-        self.current_photo_path = photo_path
+        """Display the final captured photo with optional QR code."""
+        try:
+            self.is_showing_final = True
+            self.current_photo_path = photo_path
 
-        pixmap = QPixmap(photo_path)
-        if pixmap.isNull():
-            pixmap = QPixmap(800, 600)
-            pixmap.fill(QColor("#030303"))
-            painter = QPainter(pixmap)
-            painter.setPen(QColor("#D4AF37"))
-            font = QFont("Georgia", 30)
-            painter.setFont(font)
-            painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "✓  Photo Captured")
-            painter.end()
-        else:
-            pixmap = pixmap.scaled(
-                800, 600,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
+            pixmap = QPixmap(photo_path)
+            if pixmap.isNull():
+                print(f"[VIEWER] WARNING: Could not load photo: {photo_path}")
+                pixmap = QPixmap(800, 600)
+                pixmap.fill(QColor("#030303"))
+                painter = QPainter(pixmap)
+                try:
+                    painter.setPen(QColor("#D4AF37"))
+                    font = QFont("Georgia", 30)
+                    painter.setFont(font)
+                    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "✓  Photo Captured")
+                finally:
+                    painter.end()
+            else:
+                pixmap = pixmap.scaled(
+                    800, 600,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
 
-        self.display_label.setPixmap(pixmap)
-        self.status_label.hide()
-        
-        # Update QR photo preview
-        if not pixmap.isNull():
-            preview_pixmap = pixmap.scaled(
-                200, 150,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            self.qr_photo_preview.setPixmap(preview_pixmap)
-        
-        # Show QR code if enabled
-        self._update_qr_visibility()
+            self.display_label.setPixmap(pixmap)
+            self.status_label.hide()
             
-        print("[VIEWER] Showing final photo")
+            # Update QR photo preview
+            if not pixmap.isNull():
+                preview_pixmap = pixmap.scaled(
+                    200, 150,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.qr_photo_preview.setPixmap(preview_pixmap)
+            
+            # Show QR code if enabled
+            self._update_qr_visibility()
+                
+            print("[VIEWER] Showing final photo")
+        except Exception as e:
+            print(f"[VIEWER] ERROR showing final photo: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _update_qr_visibility(self):
         """Update QR code visibility based on settings."""
-        if self.qr_visible and self.qr_pixmap and self.is_showing_final:
-            self.qr_label.setPixmap(self.qr_pixmap)
-            self.qr_widget.show()
-        else:
-            self.qr_widget.hide()
+        try:
+            if self.qr_visible and self.qr_pixmap and self.is_showing_final:
+                self.qr_label.setPixmap(self.qr_pixmap)
+                self.qr_widget.show()
+            else:
+                self.qr_widget.hide()
+        except Exception as e:
+            print(f"[VIEWER] ERROR updating QR visibility: {e}")
+            import traceback
+            traceback.print_exc()
     
     def set_qr_visible(self, visible: bool):
         """Set QR code visibility (controlled by operator)."""
-        self.qr_visible = visible
-        self._update_qr_visibility()
-        print(f"[VIEWER] QR visibility: {'ON' if visible else 'OFF'}")
+        try:
+            self.qr_visible = visible
+            self._update_qr_visibility()
+            print(f"[VIEWER] QR visibility: {'ON' if visible else 'OFF'}")
+        except Exception as e:
+            print(f"[VIEWER] ERROR setting QR visibility: {e}")
+            import traceback
+            traceback.print_exc()
 
     def set_qr_code(self, qr_image):
         """Set QR code image to display."""
-        if qr_image:
-            # Convert PIL Image to QPixmap
-            from PIL.ImageQt import ImageQt
-            qimage = ImageQt(qr_image)
-            self.qr_pixmap = QPixmap.fromImage(qimage)
-            # Display QR at 230px to fit in 260px label with 10px padding + 3px border (total 46px margin)
-            self.qr_label.setPixmap(self.qr_pixmap.scaled(230, 230, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation))
-        else:
-            self.qr_pixmap = None
+        try:
+            if qr_image:
+                # Convert PIL Image to QPixmap
+                from PIL.ImageQt import ImageQt
+                # CRITICAL: Keep reference to ImageQt to prevent garbage collection
+                # Without this, the QR code gets corrupted with green lines/artifacts
+                self._qr_image_qt = ImageQt(qr_image)
+                self.qr_pixmap = QPixmap.fromImage(self._qr_image_qt)
+                
+                # Display QR at 230px to fit in 260px label with 10px padding + 3px border (total 46px margin)
+                # Use FastTransformation to preserve QR code sharpness for scanning
+                scaled_pixmap = self.qr_pixmap.scaled(
+                    230, 230,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.FastTransformation
+                )
+                self.qr_label.setPixmap(scaled_pixmap)
+            else:
+                self.qr_pixmap = None
+                self._qr_image_qt = None
+        except Exception as e:
+            print(f"[VIEWER] ERROR setting QR code: {e}")
+            import traceback
+            traceback.print_exc()
 
     def toggle_raw_mode(self, enabled: bool):
         """Toggle raw photo mode (no frame overlay)."""

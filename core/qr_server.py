@@ -7,6 +7,7 @@ import socket
 import threading
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from urllib.parse import quote, unquote
 import qrcode
 from PIL import Image, ImageOps
@@ -166,50 +167,67 @@ class PhotoHTTPRequestHandler(BaseHTTPRequestHandler):
     
     def log_message(self, format, *args):
         """Log requests for debugging."""
-        logger.info(f"QR Server: {format % args}")
+        try:
+            logger.info(f"QR Server: {format % args}")
+        except:
+            pass  # Suppress logging errors
     
     def do_GET(self):
         """Handle GET requests."""
-        # Parse the path (remove query string)
-        path = unquote(self.path.split('?')[0])
-        
-        # Remove leading slash
-        if path.startswith('/'):
-            path = path[1:]
-        
-        # If no path or path is empty, show error
-        if not path:
-            self._send_error(404, "Not Found")
-            return
-        
-        # Check if this is a direct file request
-        file_path = self.photo_directory / path
-        
-        # If file exists, serve it
-        if file_path.exists() and file_path.is_file():
-            # Check if client wants the download page
-            user_agent = self.headers.get('User-Agent', '').lower()
-            referer = self.headers.get('Referer', '')
-            is_browser = any(x in user_agent for x in ['mozilla', 'chrome', 'safari', 'firefox', 'edge'])
+        try:
+            # Parse the path (remove query string)
+            path = unquote(self.path.split('?')[0])
             
-            # Serve download page ONLY if:
-            # 1. It's a browser request
-            # 2. It's an image file
-            # 3. The request is NOT coming from our own download page (no Referer or different referer)
-            is_from_our_page = PhotoHTTPRequestHandler.base_url and referer.startswith(PhotoHTTPRequestHandler.base_url)
+            # Remove leading slash
+            if path.startswith('/'):
+                path = path[1:]
             
-            if is_browser and path.lower().endswith(('.jpg', '.jpeg', '.png')) and not is_from_our_page:
-                print(f"[QR SERVER] Serving DOWNLOAD PAGE for: {path} (browser request, new visit)")
-                self._serve_download_page(path)
-            else:
-                # Direct file download (or image request from our download page)
-                if is_from_our_page:
-                    print(f"[QR SERVER] Serving IMAGE FILE for: {path} (from download page)")
+            # If no path or path is empty, show error
+            if not path:
+                self._send_error(404, "Not Found")
+                return
+            
+            # Check if this is a direct file request
+            file_path = self.photo_directory / path
+            
+            # If file exists, serve it
+            if file_path.exists() and file_path.is_file():
+                # Check if client wants the download page
+                user_agent = self.headers.get('User-Agent', '').lower()
+                referer = self.headers.get('Referer', '')
+                is_browser = any(x in user_agent for x in ['mozilla', 'chrome', 'safari', 'firefox', 'edge'])
+                
+                # Serve download page ONLY if:
+                # 1. It's a browser request (not direct image fetch)
+                # 2. It's an image file
+                # 3. NO Referer header (means direct URL entry or QR scan)
+                # If there IS a Referer, it means the browser is loading the image FROM our page
+                has_referer = bool(referer and len(referer) > 0)
+                
+                if is_browser and path.lower().endswith(('.jpg', '.jpeg', '.png')) and not has_referer:
+                    print(f"[QR SERVER] Serving DOWNLOAD PAGE for: {path} (browser request, no referer)")
+                    self._serve_download_page(path)
                 else:
-                    print(f"[QR SERVER] Serving FILE for: {path}")
-                self._serve_file(file_path)
-        else:
-            self._send_error(404, "File Not Found")
+                    # Direct file download (or image request from our download page)
+                    if has_referer:
+                        print(f"[QR SERVER] Serving IMAGE FILE for: {path} (from download page)")
+                    else:
+                        print(f"[QR SERVER] Serving FILE for: {path}")
+                    self._serve_file(file_path)
+            else:
+                self._send_error(404, "File Not Found")
+        except BrokenPipeError:
+            # Client disconnected - ignore
+            pass
+        except ConnectionResetError:
+            # Connection reset by peer - ignore
+            pass
+        except Exception as e:
+            logger.error(f"Error in do_GET: {e}")
+            try:
+                self._send_error(500, "Internal Server Error")
+            except:
+                pass
     
     def _serve_download_page(self, filename):
         """Serve the styled download page."""
@@ -229,9 +247,14 @@ class PhotoHTTPRequestHandler(BaseHTTPRequestHandler):
             
             print(f"[QR SERVER] Served download page for: {filename}")
             
+        except BrokenPipeError:
+            pass
         except Exception as e:
             logger.error(f"Error serving download page: {e}")
-            self._send_error(500, "Internal Server Error")
+            try:
+                self._send_error(500, "Internal Server Error")
+            except:
+                pass
     
     def _serve_file(self, file_path):
         """Serve a file directly."""
@@ -256,22 +279,38 @@ class PhotoHTTPRequestHandler(BaseHTTPRequestHandler):
             
             print(f"[QR SERVER] Served file: {file_path.name}")
             
+        except BrokenPipeError:
+            pass
+        except ConnectionResetError:
+            pass
         except Exception as e:
             logger.error(f"Error serving file: {e}")
-            self._send_error(500, "Internal Server Error")
+            try:
+                self._send_error(500, "Internal Server Error")
+            except:
+                pass
     
     def _send_error(self, code, message):
         """Send an error response."""
-        self.send_response(code)
-        self.send_header('Content-Type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(f"{code} {message}".encode())
+        try:
+            self.send_response(code)
+            self.send_header('Content-Type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(f"{code} {message}".encode())
+        except:
+            pass  # Ignore errors when sending errors
     
     def end_headers(self):
         """Add CORS headers to allow cross-origin requests."""
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET')
         super().end_headers()
+
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """HTTP Server that handles multiple requests in separate threads."""
+    daemon_threads = True  # Threads will die when main program exits
+    allow_reuse_address = True  # Allow quick restarts
 
 
 class QRCodeServer:
@@ -306,8 +345,9 @@ class QRCodeServer:
                 PhotoHTTPRequestHandler.photo_directory = photo_dir
                 PhotoHTTPRequestHandler.base_url = f"http://{self._get_local_ip()}:{port}"
                 
-                # Create server
-                self.server = HTTPServer(("0.0.0.0", port), PhotoHTTPRequestHandler)
+                # Create server with threading support
+                self.server = ThreadingHTTPServer(("0.0.0.0", port), PhotoHTTPRequestHandler)
+                self.server.timeout = 5  # Timeout for shutdown
                 
                 # Get assigned port
                 self.port = self.server.server_address[1]
@@ -387,14 +427,22 @@ class QRCodeServer:
                 if photo_path.exists():
                     try:
                         import shutil
-                        shutil.copy2(photo_path, output_file)
-                        print(f"[QR SERVER] Copied photo to output directory: {output_file}")
+                        shutil.copy2(str(photo_path), str(output_file))
+                        print(f"[QR SERVER] ✓ Copied photo to output directory: {output_file}")
+                        print(f"[QR SERVER] ✓ File size: {output_file.stat().st_size} bytes")
                     except Exception as e:
-                        print(f"[QR SERVER] ERROR copying file: {e}")
+                        print(f"[QR SERVER] ❌ ERROR copying file: {e}")
+                        import traceback
+                        traceback.print_exc()
                         # Continue anyway - maybe the file is already there
-                if not output_file.exists():
-                    print(f"[QR SERVER] WARNING: Photo not found at {photo_path} or {output_file}")
+                else:
+                    print(f"[QR SERVER] ❌ Source photo does not exist: {photo_path}")
+                    print(f"[QR SERVER] ❌ Cannot generate QR code for missing file")
                     return None
+            
+            if not output_file.exists():
+                print(f"[QR SERVER] ❌ Output file still not found at: {output_file}")
+                return None
 
             # Keep the URL short — every extra character bumps the QR version
             download_url = f"{active_url}/{quote(filename)}"
@@ -445,7 +493,18 @@ class QRCodeServer:
         try:
             if self.server:
                 print("[QR SERVER] Shutting down server...")
-                self.server.shutdown()
+                # Use shutdown() in a separate thread to avoid blocking
+                def shutdown_server():
+                    try:
+                        self.server.shutdown()
+                    except:
+                        pass
+                
+                import threading
+                shutdown_thread = threading.Thread(target=shutdown_server, daemon=True)
+                shutdown_thread.start()
+                shutdown_thread.join(timeout=3)  # Wait max 3 seconds
+                
                 self.server = None
                 logger.info("QR Server stopped")
                 print("[QR SERVER] Server stopped")

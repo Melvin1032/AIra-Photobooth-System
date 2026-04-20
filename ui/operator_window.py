@@ -2,6 +2,7 @@
 Main operator dashboard with complete UI.
 """
 
+from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QComboBox, QFrame, QSplitter,
@@ -237,7 +238,7 @@ class OperatorWindow(QMainWindow):
         self.cloudflare_tunnel = CloudflareTunnel(local_port=self.qr_server.port)
         
         # Network mode: 'local' or 'internet'
-        self.network_mode = 'local'  # Default to local network
+        self.network_mode = 'internet'  # Default to internet mode for Cloudflare Tunnel
 
         self.preview_timer = QTimer()
         self.preview_timer.timeout.connect(self._update_preview)
@@ -728,10 +729,10 @@ class OperatorWindow(QMainWindow):
         network_layout = QHBoxLayout()
         network_layout.setSpacing(8)
         
-        self.network_mode_btn = QPushButton("🌐 Local Network")
+        self.network_mode_btn = QPushButton("🌐 Internet Mode")
         self.network_mode_btn.setCheckable(True)
-        self.network_mode_btn.setChecked(False)
-        self.network_mode_btn.setToolTip("Click to enable internet access via Cloudflare Tunnel")
+        self.network_mode_btn.setChecked(True)  # Default to checked (internet mode)
+        self.network_mode_btn.setToolTip("Cloudflare Tunnel active - accessible from any network")
         self.network_mode_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {BG_INPUT};
@@ -758,8 +759,8 @@ class OperatorWindow(QMainWindow):
         
         # Status indicator
         self.network_status = QLabel("●")
-        self.network_status.setStyleSheet(f"color: {GREEN}; font-size: 16px;")
-        self.network_status.setToolTip("Green = Local, Blue = Internet")
+        self.network_status.setStyleSheet(f"color: #4A90E2; font-size: 16px;")  # Blue for internet mode
+        self.network_status.setToolTip("Blue = Internet (Cloudflare), Green = Local")
         network_layout.addWidget(self.network_status)
         
         layout.addLayout(network_layout)
@@ -931,6 +932,13 @@ class OperatorWindow(QMainWindow):
             self.event_label.setText("NO EVENT SELECTED")
             self.edit_event_btn.setVisible(False)
             self.delete_event_btn.setVisible(False)
+        
+        # Auto-start Cloudflare Tunnel if internet mode is enabled
+        if self.network_mode == 'internet':
+            print("[NETWORK] Auto-starting Cloudflare Tunnel...")
+            # Delay startup to let UI finish loading first
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(500, self._start_cloudflare_tunnel)
 
     def _initialize_camera(self):
         try:
@@ -1410,38 +1418,47 @@ class OperatorWindow(QMainWindow):
         if self.viewer_window:
             self.viewer_window.set_qr_visible(not is_hidden)
     
+    def _start_cloudflare_tunnel(self):
+        """Start Cloudflare Tunnel automatically on app startup."""
+        print("[NETWORK] Auto-starting Cloudflare Tunnel...")
+        self.network_mode_btn.setText("⏳ Starting Tunnel...")
+        self.network_mode_btn.setEnabled(False)
+        
+        import threading
+        def start_tunnel_thread():
+            success = self.cloudflare_tunnel.start_tunnel()
+            if success:
+                self.network_mode = 'internet'
+                self.network_mode_btn.setText("🌐 Internet Mode")
+                self.network_status.setStyleSheet("color: #4A90E2; font-size: 16px;")  # Blue
+                public_url = self.cloudflare_tunnel.get_public_url()
+                print(f"[NETWORK] ✓ Internet mode active: {public_url}")
+                # Update QR server base URL
+                self.qr_server.base_url = public_url
+            else:
+                # Fall back to local mode if tunnel fails
+                self.network_mode_btn.setChecked(False)
+                self.network_mode_btn.setText("🌐 Internet Mode")
+                self.network_mode = 'local'
+                self.network_status.setStyleSheet(f"color: {GREEN}; font-size: 16px;")
+                print("[NETWORK] ❌ Failed to start tunnel - using local mode")
+            self.network_mode_btn.setEnabled(True)
+        
+        thread = threading.Thread(target=start_tunnel_thread, daemon=True)
+        thread.start()
+    
     def _on_network_mode_toggle(self):
         """Toggle between local network and internet mode."""
         if self.network_mode_btn.isChecked():
             # Switch to internet mode
             print("[NETWORK] Switching to Internet mode...")
-            self.network_mode_btn.setText("⏳ Starting Tunnel...")
-            self.network_mode_btn.setEnabled(False)
-            
-            # Start Cloudflare Tunnel
-            import threading
-            def start_tunnel_thread():
-                success = self.cloudflare_tunnel.start_tunnel()
-                if success:
-                    self.network_mode = 'internet'
-                    self.network_mode_btn.setText("🌐 Internet Mode")
-                    self.network_status.setStyleSheet("color: #3498db; font-size: 16px;")  # Blue
-                    print(f"[NETWORK] ✓ Internet mode active: {self.cloudflare_tunnel.get_public_url()}")
-                else:
-                    self.network_mode_btn.setChecked(False)
-                    self.network_mode_btn.setText("🌐 Local Network")
-                    print("[NETWORK] ❌ Failed to start tunnel")
-                self.network_mode_btn.setEnabled(True)
-            
-            thread = threading.Thread(target=start_tunnel_thread, daemon=True)
-            thread.start()
-            
+            self._start_cloudflare_tunnel()
         else:
             # Switch to local mode
             print("[NETWORK] Switching to Local mode...")
             self.cloudflare_tunnel.stop_tunnel()
             self.network_mode = 'local'
-            self.network_mode_btn.setText("🌐 Local Network")
+            self.network_mode_btn.setText("🌐 Internet Mode")
             self.network_status.setStyleSheet(f"color: {GREEN}; font-size: 16px;")
             print("[NETWORK] ✓ Local mode active")
 
