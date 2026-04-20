@@ -2,12 +2,16 @@
 Print confirmation and settings dialog.
 """
 
+import logging
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QSpinBox, QCheckBox, QFrame
+    QComboBox, QSpinBox, QCheckBox, QFrame, QMessageBox
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap, QPainter
+from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
+
+logger = logging.getLogger(__name__)
 
 
 class PrintDialog(QDialog):
@@ -85,12 +89,10 @@ class PrintDialog(QDialog):
         printer_label = QLabel("Printer:")
         printer_label.setStyleSheet("color: #FFD700; font-weight: bold;")
         self.printer_combo = QComboBox()
-        self.printer_combo.addItems([
-            "Default Printer",
-            "Canon SELPHY CP1300",
-            "Epson PictureMate",
-            "HP Sprocket"
-        ])
+        
+        # Get available printers
+        self._load_printers()
+        
         self.printer_combo.setStyleSheet("""
             QComboBox {
                 background-color: #1a1a1a;
@@ -141,7 +143,7 @@ class PrintDialog(QDialog):
         layout.addWidget(settings_frame)
         
         # Info label
-        info_label = QLabel("💡 This is a UI preview. Printing functionality will be connected to backend.")
+        info_label = QLabel("💡 Select printer and options, then click Print.")
         info_label.setStyleSheet("color: #888; font-size: 11px; font-style: italic;")
         info_label.setWordWrap(True)
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -196,17 +198,96 @@ class PrintDialog(QDialog):
             }
         """)
     
+    def _load_printers(self):
+        """Load available printers into combo box."""
+        self.printer_combo.clear()
+        
+        # Get available printers
+        printer = QPrinter()
+        printers = QPrinter.availablePrinterNames()
+        
+        if printers:
+            self.printer_combo.addItems(printers)
+            # Select default printer
+            default = QPrinter.defaultPrinterName()
+            if default:
+                index = self.printer_combo.findText(default)
+                if index >= 0:
+                    self.printer_combo.setCurrentIndex(index)
+        else:
+            self.printer_combo.addItem("No printers found")
+            self.print_btn.setEnabled(False)
+    
     def _on_print(self):
         """Handle print button."""
-        self.print_copies = self.copies_spin.value()
-        printer = self.printer_combo.currentText()
+        if not self.photo_path:
+            QMessageBox.warning(self, "No Photo", "No photo selected for printing.")
+            return
         
-        print(f"[MOCK] Print requested:")
-        print(f"  - Printer: {printer}")
-        print(f"  - Copies: {self.print_copies}")
-        print(f"  - Auto-print: {self.auto_print_check.isChecked()}")
+        self.print_copies = self.copies_spin.value()
+        printer_name = self.printer_combo.currentText()
+        
+        # Create printer
+        printer = QPrinter()
+        if printer_name and printer_name != "No printers found":
+            printer.setPrinterName(printer_name)
+        
+        # Set number of copies
+        printer.setCopyCount(self.print_copies)
+        
+        # Open system print dialog
+        print_dialog = QPrintDialog(printer, self)
+        
+        if print_dialog.exec() == QPrintDialog.DialogCode.Accepted:
+            # Perform the actual printing
+            self._perform_print(printer)
         
         self.accept()
+    
+    def _perform_print(self, printer: QPrinter):
+        """Perform the actual printing."""
+        try:
+            # Load image
+            pixmap = QPixmap(self.photo_path)
+            if pixmap.isNull():
+                QMessageBox.warning(self, "Error", "Could not load photo for printing.")
+                return
+            
+            # Create painter
+            painter = QPainter(printer)
+            
+            # Get page rectangle
+            page_rect = printer.pageRect(QPrinter.Unit.DevicePixel)
+            
+            # Scale image to fit page while maintaining aspect ratio
+            scaled_pixmap = pixmap.scaled(
+                page_rect.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            
+            # Center image on page
+            x = (page_rect.width() - scaled_pixmap.width()) // 2
+            y = (page_rect.height() - scaled_pixmap.height()) // 2
+            
+            # Draw image
+            painter.drawPixmap(x, y, scaled_pixmap)
+            painter.end()
+            
+            logger.info(f"Printed {self.photo_path} with {self.print_copies} copies")
+            QMessageBox.information(
+                self,
+                "Print Complete",
+                f"Photo sent to printer.\nCopies: {self.print_copies}"
+            )
+            
+        except Exception as e:
+            logger.error(f"Print error: {e}")
+            QMessageBox.critical(
+                self,
+                "Print Error",
+                f"Failed to print:\n{e}"
+            )
     
     def get_print_settings(self) -> dict:
         """Get selected print settings."""

@@ -107,7 +107,31 @@ class FrameSelector(QWidget):
     def set_event_id(self, event_id: int):
         """Set current event and load its frames."""
         self.event_id = event_id
-        self.load_mock_frames()
+        self.load_frames_for_event(event_id)
+    
+    def load_frames_for_event(self, event_id: int):
+        """Load frames for a specific event from database."""
+        self.clear_frames()
+        
+        # Import here to avoid circular dependency
+        from core.session_manager import SessionManager
+        session_manager = SessionManager()
+        
+        try:
+            frames = session_manager.get_frames_for_event(event_id)
+            
+            for frame_data in frames:
+                self.add_frame(
+                    frame_id=frame_data["id"],
+                    name=frame_data["name"],
+                    slots=frame_data["slots"],
+                    price=frame_data["price"],
+                    image_path=frame_data.get("image_path", "")
+                )
+            
+            self.status_label.setText(f"{len(frames)} frames available")
+        finally:
+            session_manager.close()
     
     def load_mock_frames(self):
         """Load mock frame data for testing."""
@@ -396,10 +420,73 @@ class FrameSelector(QWidget):
     
     def _on_add_frame(self):
         """Handle add frame button."""
-        print("[MOCK] Add Frame button clicked - would open file dialog")
-        from PyQt6.QtWidgets import QMessageBox
-        QMessageBox.information(
+        if not self.event_id:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "No Event", "Please select an event first.")
+            return
+        
+        # Open file dialog to select frame image
+        from PyQt6.QtWidgets import QFileDialog, QInputDialog
+        file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Mock Action",
-            "This would open a file dialog to upload a new frame.\n\n(UI Test Mode)"
+            "Select Frame Image",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp)"
         )
+        
+        if not file_path:
+            return
+        
+        # Get frame name
+        name, ok = QInputDialog.getText(self, "Frame Name", "Enter frame name:")
+        if not ok or not name:
+            return
+        
+        # Get slots
+        slots_text, ok = QInputDialog.getText(self, "Number of Shots", "Enter number of shots:", text="2")
+        if not ok:
+            return
+        
+        try:
+            slots = int(slots_text)
+        except ValueError:
+            slots = 2
+        
+        # Get price
+        price_text, ok = QInputDialog.getText(self, "Price", "Enter price (₱):", text="500")
+        if not ok:
+            return
+        
+        try:
+            price = float(price_text)
+        except ValueError:
+            price = 500.0
+        
+        # Copy frame to frames directory
+        from pathlib import Path
+        import shutil
+        
+        frames_dir = Path("frames") / f"event_{self.event_id}"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        
+        dest_path = frames_dir / Path(file_path).name
+        shutil.copy2(file_path, dest_path)
+        
+        # Add to database
+        from core.session_manager import SessionManager
+        session_manager = SessionManager()
+        
+        try:
+            frame_id = session_manager.add_frame(
+                self.event_id,
+                name=name,
+                image_path=str(dest_path),
+                slots=slots,
+                price=price
+            )
+            
+            # Reload frames
+            self.load_frames_for_event(self.event_id)
+            print(f"[FRAME] Added frame: {name} (ID: {frame_id})")
+        finally:
+            session_manager.close()

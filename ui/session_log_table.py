@@ -249,6 +249,11 @@ class SessionLogTable(QTableWidget):
             elif action == reprint_action:
                 self.reprint_requested.emit(session_id)
     
+    def clear_sessions(self):
+        """Clear all sessions from the table."""
+        self.setRowCount(0)
+        self.photo_previews.clear()
+    
     def load_mock_data(self):
         """Load sample session data for testing."""
         mock_sessions = [

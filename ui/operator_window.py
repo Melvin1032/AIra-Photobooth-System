@@ -69,8 +69,8 @@ class OperatorWindow(QMainWindow):
         
         self._setup_ui()
         self._apply_theme()
-        self._load_mock_data()
         self._initialize_camera()
+        self._load_initial_data()
     
     def _setup_ui(self):
         """Setup the complete UI layout."""
@@ -687,13 +687,18 @@ class OperatorWindow(QMainWindow):
             import traceback
             traceback.print_exc()
     
-    def _load_mock_data(self):
-        """Load mock data for testing."""
-        # Load mock sessions
-        self.session_log.load_mock_data()
-        
-        # Load mock frames
-        self.frame_selector.load_mock_frames()
+    def _load_initial_data(self):
+        """Load initial data - check for existing events."""
+        # Check if there are any events
+        events = self.session_manager.get_all_events()
+        if events:
+            # Load the most recent event
+            self._load_event(events[0]['id'])
+        else:
+            # No events yet - show "Not Selected"
+            self.event_label.setText("Event: Not Selected")
+            self.edit_event_btn.setVisible(False)
+            self.delete_event_btn.setVisible(False)
     
     def _initialize_camera(self):
         """Initialize camera and start preview."""
@@ -848,12 +853,32 @@ class OperatorWindow(QMainWindow):
         self.captured_photos.append(photo_path)
         self.current_slot_index += 1
         
+        # Save photo to database
+        if hasattr(self, 'current_session_id') and self.current_session_id:
+            self.session_manager.add_photo(
+                self.current_session_id,
+                slot_number=self.current_slot_index,
+                raw_path=photo_path
+            )
+            
+            # Update session with shot count
+            self.session_manager.update_session(
+                self.current_session_id,
+                shots_taken=self.current_slot_index
+            )
+        
         # Show small review overlay (live preview continues!)
         self._show_photo_overlay(photo_path)
         
         # Update viewer with final photo
         if self.viewer_window:
             self.viewer_window.show_final_photo(photo_path)
+        
+        # Update session log
+        self._load_sessions_for_event(self.current_event_id)
+        
+        # Update shots label
+        self.shots_taken_label.setText(f"Shots: {self.current_slot_index}")
         
         # Clear overlay after 3 seconds
         self.review_timer.start(3000)
@@ -886,9 +911,13 @@ class OperatorWindow(QMainWindow):
         
         frame_name = metadata.get('frame_name', 'Unknown')
         slots = metadata.get('slots', 2)
+        price = metadata.get('price', 0)
         
         self.selected_frame_label.setText(f"Frame: {frame_name} ({slots} shots)")
         self.shot_status.setText(f"Ready - {slots} shots remaining")
+        
+        # Update amount label
+        self.amount_label.setText(f"Amount: ₱{price:.0f}")
         
         # Update viewer if open
         if self.viewer_window:
@@ -896,20 +925,38 @@ class OperatorWindow(QMainWindow):
     
     def _on_frame_deleted(self, frame_id: int):
         """Handle frame deletion."""
-        print(f"[MOCK] Frame {frame_id} deleted")
+        self.session_manager.delete_frame(frame_id)
+        self.frame_selector.load_frames_for_event(self.current_event_id)
+        print(f"[FRAME] Frame {frame_id} deleted")
     
     def _on_frame_edit(self, frame_id: int, new_name: str):
         """Handle frame edit."""
-        print(f"[MOCK] Frame {frame_id} renamed to '{new_name}'")
+        self.session_manager.update_frame(frame_id, name=new_name)
+        self.frame_selector.load_frames_for_event(self.current_event_id)
+        print(f"[FRAME] Frame {frame_id} renamed to '{new_name}'")
     
     def _on_capture_clicked(self):
         """Handle capture button click."""
+        if not self.current_event_id:
+            QMessageBox.warning(self, "No Event", "Please create or load an event first.")
+            return
+        
         if not self.current_frame_id:
             QMessageBox.warning(self, "No Frame", "Please select a frame first.")
             return
         
         if self.is_countdown_active:
             return
+        
+        # Create a new session if needed
+        if not hasattr(self, 'current_session_id') or self.current_session_id is None:
+            client_name = self.client_name_input.text()
+            self.current_session_id = self.session_manager.create_session(
+                self.current_event_id,
+                client_name=client_name,
+                frame_id=self.current_frame_id
+            )
+            print(f"[SESSION] Created session {self.current_session_id}")
         
         self.is_countdown_active = True
         self.capture_btn.setEnabled(False)
@@ -922,7 +969,7 @@ class OperatorWindow(QMainWindow):
         if self.viewer_window:
             self.viewer_window.show_countdown(3)
         
-        print("[MOCK] Capture initiated - countdown started")
+        print("[CAPTURE] Capture initiated - countdown started")
     
     def _on_countdown_finished(self):
         """Handle countdown completion."""
@@ -1038,23 +1085,28 @@ class OperatorWindow(QMainWindow):
         self.current_slot_index = 0
         self.shots_taken_label.setText("Shots: 0 / 0")
         self.amount_label.setText("Amount: ₱0")
-        print("[MOCK] New session started")
+        self.current_session_id = None
+        print("[SESSION] New session form cleared")
     
     def _on_usb_export(self):
         """Handle USB export button."""
-        QMessageBox.information(
-            self,
-            "USB Export",
-            "USB Export functionality will be connected to backend.\n\n(UI Test Mode)"
-        )
+        if not self.current_event_id:
+            QMessageBox.warning(self, "No Event", "Please select an event first.")
+            return
+        
+        from core.usb_exporter import USBExporter
+        exporter = USBExporter(self)
+        exporter.export_event(self.current_event_id, self.session_manager)
     
     def _on_csv_export(self):
         """Handle CSV export button."""
-        QMessageBox.information(
-            self,
-            "CSV Export",
-            "CSV Export functionality will be connected to backend.\n\n(UI Test Mode)"
-        )
+        if not self.current_event_id:
+            QMessageBox.warning(self, "No Event", "Please select an event first.")
+            return
+        
+        from core.csv_export import CSVExporter
+        exporter = CSVExporter(self)
+        exporter.export_sessions(self.current_event_id, self.session_manager)
     
     def _on_create_event(self):
         """Handle create event button."""
@@ -1063,103 +1115,167 @@ class OperatorWindow(QMainWindow):
             from datetime import datetime
             date = datetime.now().strftime("%Y-%m-%d")
             
-            self.current_event_id = 1  # Mock ID
-            self.event_label.setText(f"Event: {name}")
+            # Create event in database
+            event_id = self.session_manager.create_event(name, date)
+            self._load_event(event_id)
             
-            # Show event management buttons
-            self.edit_event_btn.setVisible(True)
-            self.delete_event_btn.setVisible(True)
-            
-            # Load frames for this event
-            self.frame_selector.set_event_id(self.current_event_id)
-            
-            print(f"[MOCK] Event created: {name}")
+            print(f"[EVENT] Event created: {name} (ID: {event_id})")
     
     def _on_load_event(self):
         """Handle load event button."""
-        # Mock event selection
-        events = [
-            "Wedding - Santos & Reyes (2026-04-15)",
-            "Birthday Party - Alex (2026-04-20)",
-            "Corporate Event - XYZ Corp (2026-04-25)"
-        ]
+        # Get real events from database
+        events = self.session_manager.get_all_events()
         
-        event, ok = QInputDialog.getItem(
-            self, "Load Event", "Select event:", events, 0, False
+        if not events:
+            QMessageBox.information(self, "No Events", "No events found. Create an event first.")
+            return
+        
+        # Format events for display
+        event_items = []
+        for event in events:
+            display = f"{event['name']} ({event['date']})"
+            event_items.append((display, event['id']))
+        
+        event_names = [item[0] for item in event_items]
+        
+        selected, ok = QInputDialog.getItem(
+            self, "Load Event", "Select event:", event_names, 0, False
         )
         
-        if ok and event:
-            self.current_event_id = 1  # Mock ID
-            self.event_label.setText(f"Event: {event.split(' (')[0]}")
-            
-            # Show event management buttons
-            self.edit_event_btn.setVisible(True)
-            self.delete_event_btn.setVisible(True)
-            
-            # Load frames
-            self.frame_selector.set_event_id(self.current_event_id)
-            
-            print(f"[MOCK] Event loaded: {event}")
+        if ok and selected:
+            # Find the event ID
+            event_id = next(item[1] for item in event_items if item[0] == selected)
+            self._load_event(event_id)
+            print(f"[EVENT] Event loaded: {selected}")
+    
+    def _load_event(self, event_id: int):
+        """Load an event by ID."""
+        event = self.session_manager.get_event(event_id)
+        if not event:
+            QMessageBox.warning(self, "Error", "Event not found.")
+            return
+        
+        self.current_event_id = event_id
+        self.event_label.setText(f"Event: {event['name']}")
+        
+        # Show event management buttons
+        self.edit_event_btn.setVisible(True)
+        self.delete_event_btn.setVisible(True)
+        
+        # Load frames for this event
+        self.frame_selector.load_frames_for_event(event_id)
+        
+        # Load sessions for this event
+        self._load_sessions_for_event(event_id)
+    
+    def _load_sessions_for_event(self, event_id: int):
+        """Load sessions for the current event."""
+        self.session_log.clear_sessions()
+        sessions = self.session_manager.get_sessions_for_event(event_id)
+        
+        for session in sessions:
+            self.session_log.add_session(
+                session_id=session['id'],
+                client_name=session['client_name'] or "Anonymous",
+                frame_name=session.get('frame_name', 'Unknown'),
+                amount=session['amount'] or 0,
+                payment_status=session['payment_status'] or 'Unpaid',
+                shots=session['shots_taken'] or 0,
+                status=session['status'] or 'Active',
+                timestamp=session['created_at'].split(' ')[1] if ' ' in str(session['created_at']) else ''
+            )
     
     def _edit_current_event(self):
         """Edit current event."""
         if not self.current_event_id:
             return
         
-        current_name = self.event_label.text().replace("Event: ", "")
+        event = self.session_manager.get_event(self.current_event_id)
+        if not event:
+            return
+        
         new_name, ok = QInputDialog.getText(
-            self, "Edit Event", "Event name:", text=current_name
+            self, "Edit Event", "Event name:", text=event['name']
         )
         
         if ok and new_name:
+            self.session_manager.update_event(self.current_event_id, name=new_name)
             self.event_label.setText(f"Event: {new_name}")
-            print(f"[MOCK] Event renamed to: {new_name}")
+            print(f"[EVENT] Event renamed to: {new_name}")
     
     def _delete_current_event(self):
         """Delete current event."""
         if not self.current_event_id:
             return
         
+        event = self.session_manager.get_event(self.current_event_id)
+        event_name = event['name'] if event else "this event"
+        
         reply = QMessageBox.question(
             self,
             "Delete Event",
-            "Are you sure you want to delete this event?\n\nThis action cannot be undone.",
+            f"Are you sure you want to delete '{event_name}'?\n\nThis will delete all sessions, photos, and frames associated with this event.\n\nThis action cannot be undone.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         
         if reply == QMessageBox.StandardButton.Yes:
+            self.session_manager.delete_event(self.current_event_id)
             self.current_event_id = None
             self.event_label.setText("Event: Not Selected")
             self.edit_event_btn.setVisible(False)
             self.delete_event_btn.setVisible(False)
             self.frame_selector.clear_frames()
-            print("[MOCK] Event deleted")
+            self.session_log.clear_sessions()
+            print(f"[EVENT] Event deleted: {event_name}")
     
     def _on_reprint(self, session_id: int):
         """Handle reprint request."""
-        print(f"[MOCK] Reprint requested for session {session_id}")
-        QMessageBox.information(self, "Reprint", f"Reprint session {session_id}\n\n(UI Test Mode)")
+        session = self.session_manager.get_session(session_id)
+        if not session:
+            QMessageBox.warning(self, "Error", "Session not found.")
+            return
+        
+        # Get photos for this session
+        photos = self.session_manager.get_photos_for_session(session_id)
+        if not photos:
+            QMessageBox.information(self, "No Photos", "No photos found for this session.")
+            return
+        
+        # Open print dialog with the last photo
+        from ui.print_dialog import PrintDialog
+        dialog = PrintDialog(photos[-1].get('processed_path') or photos[-1].get('raw_path'), parent=self)
+        if dialog.exec() == PrintDialog.DialogCode.Accepted:
+            settings = dialog.get_print_settings()
+            print(f"[PRINT] Reprint session {session_id} with settings: {settings}")
     
     def _on_delete_session(self, session_id: int):
         """Handle session deletion."""
         reply = QMessageBox.question(
             self,
             "Delete Session",
-            f"Delete session {session_id}?",
+            f"Delete session {session_id}?\n\nThis will also delete all photos associated with this session.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            print(f"[MOCK] Session {session_id} deleted")
+            self.session_manager.delete_session(session_id)
+            self._load_sessions_for_event(self.current_event_id)
+            print(f"[SESSION] Session {session_id} deleted")
     
     def _on_edit_session(self, session_id: int):
         """Handle session edit."""
+        session = self.session_manager.get_session(session_id)
+        if not session:
+            return
+        
         new_name, ok = QInputDialog.getText(
-            self, "Edit Session", "Client name:"
+            self, "Edit Session", "Client name:", text=session['client_name'] or ""
         )
         
         if ok:
-            print(f"[MOCK] Session {session_id} client renamed to: {new_name}")
+            self.session_manager.update_session(session_id, client_name=new_name)
+            self._load_sessions_for_event(self.current_event_id)
+            print(f"[SESSION] Session {session_id} client renamed to: {new_name}")
     
     def _show_settings(self):
         """Show settings dialog."""
