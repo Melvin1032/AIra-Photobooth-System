@@ -915,13 +915,16 @@ class OperatorWindow(QMainWindow):
         if self.is_countdown_active:
             return
 
-        if not hasattr(self, 'current_session_id') or self.current_session_id is None:
-            client_name = self.client_name_input.text()
-            self.current_session_id = self.session_manager.create_session(
-                self.current_event_id,
-                client_name=client_name,
-                frame_id=self.current_frame_id
-            )
+        # Always create a new session for each capture (1 picture = 1 ID)
+        client_name = self.client_name_input.text()
+        self.current_session_id = self.session_manager.create_session(
+            self.current_event_id,
+            client_name=client_name,
+            frame_id=self.current_frame_id
+        )
+        # Reset for new session
+        self.captured_photos.clear()
+        self.current_slot_index = 0
 
         self.is_countdown_active = True
         self.capture_btn.setEnabled(False)
@@ -1151,6 +1154,11 @@ class OperatorWindow(QMainWindow):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self.session_manager.delete_session(session_id)
+            # Clear current_session_id if we deleted the current session
+            if hasattr(self, 'current_session_id') and self.current_session_id == session_id:
+                self.current_session_id = None
+                self.captured_photos.clear()
+                self.current_slot_index = 0
             self._load_sessions_for_event(self.current_event_id)
 
     def _on_edit_session(self, session_id: int):
