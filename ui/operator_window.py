@@ -20,6 +20,7 @@ from core.camera import CameraManager
 from core.compositor import ImageCompositor
 from core.session_manager import SessionManager
 from core.qr_server import QRCodeServer
+from core.cloudflare_tunnel import CloudflareTunnel
 
 
 # ── Shared Style Tokens ──────────────────────────────────────────────────────
@@ -226,6 +227,10 @@ class OperatorWindow(QMainWindow):
         self.compositor = ImageCompositor()
         self.session_manager = SessionManager()
         self.qr_server = QRCodeServer()
+        self.cloudflare_tunnel = CloudflareTunnel(local_port=self.qr_server.port)
+        
+        # Network mode: 'local' or 'internet'
+        self.network_mode = 'local'  # Default to local network
 
         self.preview_timer = QTimer()
         self.preview_timer.timeout.connect(self._update_preview)
@@ -699,6 +704,46 @@ class OperatorWindow(QMainWindow):
         """)
         self.show_qr_btn.clicked.connect(self._on_show_qr_toggle)
         layout.addWidget(self.show_qr_btn)
+        
+        # Network mode toggle (Local vs Internet)
+        network_layout = QHBoxLayout()
+        network_layout.setSpacing(8)
+        
+        self.network_mode_btn = QPushButton("🌐 Local Network")
+        self.network_mode_btn.setCheckable(True)
+        self.network_mode_btn.setChecked(False)
+        self.network_mode_btn.setToolTip("Click to enable internet access via Cloudflare Tunnel")
+        self.network_mode_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BG_INPUT};
+                color: {TEXT_SEC};
+                border: 1px solid {BORDER_MID};
+                border-radius: 3px;
+                padding: 8px 12px;
+                font-size: 10px;
+                font-weight: bold;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                border-color: {GOLD};
+                color: {TEXT_PRI};
+            }}
+            QPushButton:checked {{
+                background-color: {GOLD};
+                color: #0a0a0a;
+                border-color: {GOLD};
+            }}
+        """)
+        self.network_mode_btn.clicked.connect(self._on_network_mode_toggle)
+        network_layout.addWidget(self.network_mode_btn)
+        
+        # Status indicator
+        self.network_status = QLabel("●")
+        self.network_status.setStyleSheet(f"color: {GREEN}; font-size: 16px;")
+        self.network_status.setToolTip("Green = Local, Blue = Internet")
+        network_layout.addWidget(self.network_status)
+        
+        layout.addLayout(network_layout)
 
         # Raw mode toggle
         self.raw_mode_check = QCheckBox("Raw Photo Mode (No Frame)")
@@ -1050,22 +1095,36 @@ class OperatorWindow(QMainWindow):
 
         # Generate QR code if enabled
         qr_image = None
-        if self.qr_download_enabled and self.qr_server.base_url:
-            # ALWAYS use the raw photo for QR code since compositing may fail
-            # The QR server will copy it to events/output/ for serving
-            from pathlib import Path
-            qr_photo_path = photo_path  # Use raw photo path
-            
-            # If compositing succeeded and file exists, use processed path
-            if Path(processed_path).exists() and processed_path != photo_path:
-                qr_photo_path = processed_path
-                print(f"[QR] Using composited photo for QR code: {qr_photo_path}")
+        if self.qr_download_enabled:
+            # Determine which URL to use based on network mode
+            if self.network_mode == 'internet' and self.cloudflare_tunnel.get_public_url():
+                # Use Cloudflare public URL
+                base_url = self.cloudflare_tunnel.get_public_url()
+                print(f"[QR] Using internet mode URL: {base_url}")
+            elif self.qr_server.base_url:
+                # Use local network URL
+                base_url = self.qr_server.base_url
+                print(f"[QR] Using local network URL: {base_url}")
             else:
-                print(f"[QR] Using raw photo for QR code: {qr_photo_path}")
+                print("[QR] WARNING: No server URL available")
+                base_url = None
             
-            qr_image = self.qr_server.generate_qr_code(qr_photo_path)
-            if qr_image:
-                print(f"[QR] Generated QR code for: {qr_photo_path}")
+            if base_url:
+                # ALWAYS use the raw photo for QR code since compositing may fail
+                # The QR server will copy it to events/output/ for serving
+                from pathlib import Path
+                qr_photo_path = photo_path  # Use raw photo path
+                
+                # If compositing succeeded and file exists, use processed path
+                if Path(processed_path).exists() and processed_path != photo_path:
+                    qr_photo_path = processed_path
+                    print(f"[QR] Using composited photo for QR code: {qr_photo_path}")
+                else:
+                    print(f"[QR] Using raw photo for QR code: {qr_photo_path}")
+                
+                qr_image = self.qr_server.generate_qr_code(qr_photo_path, base_url=base_url)
+                if qr_image:
+                    print(f"[QR] Generated QR code for: {qr_photo_path}")
 
         # Update viewer with photo and optional QR code
         if self.viewer_window:
@@ -1331,6 +1390,41 @@ class OperatorWindow(QMainWindow):
         # Update viewer window
         if self.viewer_window:
             self.viewer_window.set_qr_visible(not is_hidden)
+    
+    def _on_network_mode_toggle(self):
+        """Toggle between local network and internet mode."""
+        if self.network_mode_btn.isChecked():
+            # Switch to internet mode
+            print("[NETWORK] Switching to Internet mode...")
+            self.network_mode_btn.setText("⏳ Starting Tunnel...")
+            self.network_mode_btn.setEnabled(False)
+            
+            # Start Cloudflare Tunnel
+            import threading
+            def start_tunnel_thread():
+                success = self.cloudflare_tunnel.start_tunnel()
+                if success:
+                    self.network_mode = 'internet'
+                    self.network_mode_btn.setText("🌐 Internet Mode")
+                    self.network_status.setStyleSheet("color: #3498db; font-size: 16px;")  # Blue
+                    print(f"[NETWORK] ✓ Internet mode active: {self.cloudflare_tunnel.get_public_url()}")
+                else:
+                    self.network_mode_btn.setChecked(False)
+                    self.network_mode_btn.setText("🌐 Local Network")
+                    print("[NETWORK] ❌ Failed to start tunnel")
+                self.network_mode_btn.setEnabled(True)
+            
+            thread = threading.Thread(target=start_tunnel_thread, daemon=True)
+            thread.start()
+            
+        else:
+            # Switch to local mode
+            print("[NETWORK] Switching to Local mode...")
+            self.cloudflare_tunnel.stop_tunnel()
+            self.network_mode = 'local'
+            self.network_mode_btn.setText("🌐 Local Network")
+            self.network_status.setStyleSheet(f"color: {GREEN}; font-size: 16px;")
+            print("[NETWORK] ✓ Local mode active")
 
     def _on_raw_mode_toggle(self, state):
         """Toggle raw photo mode (no frame overlay)."""
@@ -1559,6 +1653,10 @@ class OperatorWindow(QMainWindow):
             # Close database
             if hasattr(self, 'session_manager') and self.session_manager:
                 self.session_manager.close()
+            
+            # Stop Cloudflare Tunnel if running
+            if hasattr(self, 'cloudflare_tunnel') and self.cloudflare_tunnel:
+                self.cloudflare_tunnel.stop_tunnel()
             
             # QR server will auto-cleanup as daemon thread
             

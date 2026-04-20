@@ -354,19 +354,23 @@ class QRCodeServer:
         except Exception:
             return "localhost"
     
-    def generate_qr_code(self, photo_path: str, size: int = 300) -> Image.Image:
+    def generate_qr_code(self, photo_path: str, size: int = 300, base_url: str = None) -> Image.Image:
         """Generate QR code image for a photo.
 
         Args:
             photo_path: Path to the photo file
             size: QR code size in pixels (300+ recommended for screen display)
+            base_url: Custom base URL (uses server base_url if None)
 
         Returns:
             PIL Image of the QR code
         """
-        if not self.base_url:
-            logger.error("QR Server not running")
-            print("[QR SERVER] Cannot generate QR code - server not running")
+        # Use provided base_url or fall back to server's base_url
+        active_url = base_url or self.base_url
+        
+        if not active_url:
+            logger.error("QR Server not running and no base_url provided")
+            print("[QR SERVER] Cannot generate QR code - no server URL available")
             return None
 
         try:
@@ -393,7 +397,7 @@ class QRCodeServer:
                     return None
 
             # Keep the URL short — every extra character bumps the QR version
-            download_url = f"{self.base_url}/{quote(filename)}"
+            download_url = f"{active_url}/{quote(filename)}"
             print(f"[QR SERVER] ✓ Generated download URL: {download_url}")
             print(f"[QR SERVER] ✓ URL length: {len(download_url)} characters")
 
